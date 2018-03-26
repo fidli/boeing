@@ -1,88 +1,89 @@
-#include <sys/stat.h>
-#include <time.h>
-#include <dlfcn.h>
-#include <unistd.h>
-
 #include "stdio.h"
+#include "linux_types.h"
+#include <errno.h>
+#include <stdlib.h>
+#include <malloc.h>
+#include "string.h"
+#include <fcntl.h>
+#include <sys/ioctl.h>
+#include <dlfcn.h>
 
-#undef ASSERT
-#ifdef RELEASE
-#define ASSERT 
-#else
-bool gassert = false;
-char gabuffer[1024];
-#define ASSERT(expression) if(!(expression)) { sprintf(gabuffer, "ASSERT FAILED on line %d in file %s\n", __LINE__, __FILE__); gassert = true; printf(gabuffer);}
-#endif
+#include "util_time.h"
+#include "linux_time.cpp"
 
-void * platformHandle = NULL;
-void (*initPlatform)(bool*,char*) = NULL;
-void (*iterate)(bool*) = NULL;
-void (*closePlatform)(void) = NULL;
+#include "common.h"
 
-inline void closeDll(){
-    if(platformHandle != NULL){
-        if(closePlatform != NULL) closePlatform();
-        dlclose(platformHandle);
-        platformHandle = NULL;
-        initPlatform = NULL;
-        closePlatform = NULL;
-        iterate = NULL;
+#define PERSISTENT_MEM MEGABYTE(10)
+#define TEMP_MEM MEGABYTE(10)
+#define STACK_MEM MEGABYTE(10)
+
+
+#include "util_mem.h"
+#include "util_filesystem.h"
+#include "linux_filesystem.cpp"
+
+#include "wiringPi.h"
+#include "wiringPiI2C.h"
+
+#include "mpu6050.cpp"
+#include "linux_net.cpp"
+
+#include "pi_domain.cpp"
+
+
+
+bool initPlatform()
+{
+    
+    void * memoryStart = valloc(TEMP_MEM + PERSISTENT_MEM + STACK_MEM);
+    if (memoryStart)
+    {
+        initMemory(memoryStart);
+        
+        if(!initNet()){
+            return false;
+        }
+        
+        domainState = (DomainState *) mem.persistent;
+        ASSERT(PERSISTENT_MEM >= sizeof(DomainState));
+        
+        wiringPiSetup();
+        
+        domainState->memsHandle.fd = wiringPiI2CSetup(0x68);
+        
+        if(domainState->memsHandle.fd < 0){
+            return false;
+        }
+        
+        
+        mpu6050_reset(&domainState->memsHandle);
+        mpu6050_setup(&domainState->memsHandle, {GyroPrecision_500, AccPrecision_4});
+        printf("mpu6050 pwr_mngmt1 %hhu\n", read8Reg(&domainState->memsHandle, MPU6050_REGISTER_PWR_MGMT_1));
+        
+        NetSocketSettings settings;
+        settings.blocking = false;
+        settings.reuseAddr = true;
+        if(!openSocket(&domainState->localSocket, &settings)){
+            printf("falied to open local socket\n");
+            return false;
+        }
+        if(!tcpConnect(&domainState->localSocket, "10.0.0.10", "25555")){
+            printf("failed to connect to server\n");
+            return false; 
+        }
+        
+        return true;
     }
+    
+    return false;
 }
 
 
+
 int main(int argc, char ** argv) {
-    
-    char platformDll[] = "./platform.so";
-    
-    long lastChange = 0;
-    
-    bool run = true;
-    
-    
-    
-    
-    while(run){
-        struct stat attr;
-        stat(platformDll, &attr);
-        if(lastChange != (long)attr.st_mtime){
-            closeDll();
-            
-            gassert = false;
-            platformHandle = dlopen(platformDll, RTLD_NOW | RTLD_GLOBAL);
-            if(platformHandle){
-                initPlatform = (void (*)(bool*,char*))dlsym(platformHandle, "initPlatform");
-                iterate = (void (*)(bool*))dlsym(platformHandle, "iterate");
-                closePlatform = (void (*)(void))dlsym(platformHandle, "closePlatform");
-                if(closePlatform == NULL || iterate == NULL || closePlatform == NULL){
-                    printf("Failed to find functions\n");
-                    dlclose(platformHandle);
-                    platformHandle = NULL;
-                }else{
-                    initPlatform(&gassert, gabuffer);
-                }
-                
-            }else{
-                printf("dlerr: %s\n", dlerror());
-            }
-            
-            
-            lastChange = (long)attr.st_mtime;
-        }
-        if(gassert){
-            printf(gabuffer);
-        }else{
-            if(platformHandle != NULL){
-                iterate(&run);
-            }else{
-                printf("Failed to load platform module. Sleeping for 1 second.\n");
-                sleep(1);
-            }
-        }
+    bool keepRunning = initPlatform();
+    while(keepRunning){
+        iterateDomain(&keepRunning);
     }
-    closeDll();
-    
-    return 0;
-    
     
 }
