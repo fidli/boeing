@@ -21,6 +21,8 @@
 #include "util_mem.h"
 #include "util_filesystem.h"
 #include "linux_filesystem.cpp"
+#include "linux_thread.cpp"
+
 
 #include "wiringPi.h"
 #include "wiringPiI2C.h"
@@ -44,6 +46,7 @@ bool initPlatform()
             return false;
         }
         
+        
         domainState = (DomainState *) mem.persistent;
         ASSERT(PERSISTENT_MEM >= sizeof(DomainState));
         
@@ -56,21 +59,6 @@ bool initPlatform()
         }
         
         
-        mpu6050_reset(&domainState->memsHandle);
-        mpu6050_setup(&domainState->memsHandle, {GyroPrecision_500, AccPrecision_4});
-        printf("mpu6050 pwr_mngmt1 %hhu\n", read8Reg(&domainState->memsHandle, MPU6050_REGISTER_PWR_MGMT_1));
-        
-        NetSocketSettings settings;
-        settings.blocking = false;
-        settings.reuseAddr = true;
-        if(!openSocket(&domainState->localSocket, &settings)){
-            printf("falied to open local socket\n");
-            return false;
-        }
-        if(!tcpConnect(&domainState->localSocket, "10.0.0.10", "25555")){
-            printf("failed to connect to server\n");
-            return false; 
-        }
         
         return true;
     }
@@ -82,8 +70,8 @@ bool initPlatform()
 
 int main(int argc, char ** argv) {
     bool keepRunning = initPlatform();
-    while(keepRunning){
-        iterateDomain(&keepRunning);
+    if(keepRunning){
+        domainRun();
     }
     
 }
