@@ -1,6 +1,9 @@
 #ifndef MPU6050
 #define MPU6050
 
+
+#define DEBUG 1
+
 float mpu6050_g = 9.8f;
 
 enum GyroPrecision{
@@ -17,20 +20,20 @@ enum AccPrecision{
     AccPrecision_16
 };
 
-
+#pragma pack(push, 1)
 struct MPU6050Settings{
     GyroPrecision gyroPrecision;
     AccPrecision accPrecision;
+    uint16 sampleRate;
 };
+#pragma pack(pop)
 
 
 struct MPU6050Handle{
     //platform, lib specific handles
     int fd;
     //mpu6050 specific stuff
-    GyroPrecision gyroPrecision;
-    AccPrecision accPrecision;
-    
+    MPU6050Settings settings;
 };
 
 
@@ -86,7 +89,10 @@ void mpu6050_reset(MPU6050Handle * handle){
     //64 is default value of this register
     uint8 reg;
     while((reg = read8Reg(handle, MPU6050_REGISTER_PWR_MGMT_1)) != 64){
+#if DEBUG
         printf("reseting device  %hhu\n", reg);
+        sleep(1);
+#endif
     }
 }
 
@@ -100,7 +106,9 @@ void mpu6050_setup(MPU6050Handle * handle, const MPU6050Settings settings){
     
     uint8 reg;
     while((reg = read8Reg(handle, MPU6050_REGISTER_USER_CONTROL)) != 64){
+#if DEBUG
         printf("reseting fifo %hhu\n", reg);
+#endif
     }
     
     //clean the reg
@@ -113,8 +121,9 @@ void mpu6050_setup(MPU6050Handle * handle, const MPU6050Settings settings){
     write8Reg(handle, MPU6050_REGISTER_FIFO_EN, 64+32+16+8);
     //no FSYNC, NO lfp
     write8Reg(handle, MPU6050_REGISTER_CONFIG, 0);
-    //sample rate = (8khz / (7+1))
-    write8Reg(handle, MPU6050_REGISTER_SAMPLE_RATE, 15);
+    //sample rate = (8khz / (settings->sampleRate+1))
+    uint8 param = (8000 / settings.sampleRate) - 1;
+    write8Reg(handle, MPU6050_REGISTER_SAMPLE_RATE, param);
     
     //sensitivity
     write8Reg(handle, MPU6050_REGISTER_ACCEL_CONFIG, settings.accPrecision << 3);
@@ -178,6 +187,12 @@ void mpu6050_gyro2float(const MPU6050Settings setting, const int16 x, const int1
     *result_z = attun * z;
 }
 
-
+float32 mpu6050_getTimeDelta(const uint16 sampleRate){
+    if(sampleRate == 250){
+        return 0.04f;
+    }else{
+        return 1.0f / sampleRate;
+    }
+}
 
 #endif

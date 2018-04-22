@@ -4,7 +4,7 @@
 #include "stdio.h"
 #include <unistd.h>
 #include "mpu6050.cpp"
-
+#include "messages.h"
 
 #include "common.h"
 #include "util_mem.h"
@@ -21,7 +21,9 @@ struct DomainState{
     int16 tail;
     Thread poller;
     uint16 fifoCount;
-    byte submitFifo[4092];
+    bool haltPolling;
+    bool pollHalted;
+    
 };
 
 DomainState * domainState;
@@ -29,11 +31,18 @@ DomainState * domainState;
 
 void pollModule(bool * go){
     while(*go){
+        if(domainState->haltPolling){
+            domainState->pollHalted = true;
+            domainState->haltPolling = false;
+            while(domainState->pollHalted){}
+        }
+        
         //usleep(100000);
         uint16 result = mpu6050_fifoCount(&domainState->memsHandle);
         
         if(result >= 1024){
             printf("overflow, fuk: result: %hu\n", result);
+            result = 1024;
         }
         
         uint16 size = ARRAYSIZE(domainState->fifoData);
@@ -44,7 +53,7 @@ void pollModule(bool * go){
         {
             uint8 data = mpu6050_readFifoByte(&domainState->memsHandle);
             domainState->fifoData[i] = data;
-            /*
+#if 0
             int16 toPrint;
             if(i&1){
                 toPrint = ((domainState->fifoData[i-1]) << 8) | data;
@@ -67,38 +76,79 @@ void pollModule(bool * go){
             }
             if(i%12 == 11){
                 printf(" gz: %hd i:(%hu)\n", toPrint, i);
-            }*/
+            }
+#endif
         }
         domainState->head = tail;
         FETCH_AND_ADD(&domainState->fifoCount, result);
+        
     }
+}
+
+#define IMMEDIATE 0
+
+void connectToServer(volatile bool * go){
+    domainState->haltPolling = true;
+#if IMMEDIATE
+#else
+    
+    while(tcpConnect(&domainState->localSocket, "10.0.0.10", "25555") == false){
+        printf("failed to connect to server\n");
+        sleep(1);
+    }
+    //send settings and other info
+    NetSendSource namaste;
+    Message namasteMessage;
+    namasteMessage.type = MessageType_Init;
+    namaste.bufferLength = sizeof(namasteMessage.reserved) + sizeof(namasteMessage.init);
+    sprintf(namasteMessage.init.name, "61.68");
+    namasteMessage.init.settings = domainState->memsHandle.settings;
+    namaste.buffer = (char*) &namasteMessage;
+    while(true){
+        NetResultType subRes = netSend(&domainState->localSocket, &namaste);
+        if(subRes == NetResultType_Ok || subRes == NetResultType_Closed){
+            printf("init message sent\n");
+            break;
+        }
+    }
+#endif
+    
+    
+    
+    while(domainState->haltPolling){}
+    
+    
+    mpu6050_reset(&domainState->memsHandle);
+    mpu6050_setup(&domainState->memsHandle, domainState->memsHandle.settings);
+    printf("mpu6050 fifo size: %hhu\n", mpu6050_fifoCount(&domainState->memsHandle));
+    printf("mpu6050 pwr_mngmt1 %hhu\n", read8Reg(&domainState->memsHandle, MPU6050_REGISTER_PWR_MGMT_1));
+    domainState->head = 0;
+    domainState->tail = 0;
+    domainState->fifoCount = 0;
+    domainState->pollHalted = false;
 }
 
 void domainRun(){
     volatile bool go = true;
     
-    domainState->head = 0;
-    domainState->tail = 0;
-    domainState->fifoCount = 0;
     
-    mpu6050_reset(&domainState->memsHandle);
-    mpu6050_setup(&domainState->memsHandle, {GyroPrecision_500, AccPrecision_4});
-    printf("mpu6050 fifo size: %hhu\n", mpu6050_fifoCount(&domainState->memsHandle));
-    printf("mpu6050 pwr_mngmt1 %hhu\n", read8Reg(&domainState->memsHandle, MPU6050_REGISTER_PWR_MGMT_1));
     
     NetSocketSettings settings;
     settings.blocking = true;
     settings.reuseAddr = true;
+    
+    
     if(!openSocket(&domainState->localSocket, &settings)){
         printf("falied to open local socket\n");
         go &= false;
-    }
-    if(!tcpConnect(&domainState->localSocket, "10.0.0.10", "25555")){
-        printf("failed to connect to server\n");
-        go &= false; 
+        return;
     }
     
-#define IMMEDIATE 0
+    domainState->memsHandle.settings = {GyroPrecision_500, AccPrecision_4, 250};
+    domainState->haltPolling =  false;
+    domainState->pollHalted = false;
+    
+    
     
 #if IMMEDIATE
 #else
@@ -108,6 +158,13 @@ void domainRun(){
     }
 #endif
     
+    
+    Message header;
+    header.type = MessageType_Data;
+    
+    char * sendData = &PUSHA(char, ARRAYSIZE(domainState->fifoData));
+    
+    connectToServer(&go);
     
     
     while(go){
@@ -143,29 +200,72 @@ void domainRun(){
             uint16 tail = (domainState->tail + toRead) % size;
             
             
+            
+            
             for(uint16 i = domainState->tail, j = 0; i != tail; i = (i+1) % size, j++)
             {
-                domainState->submitFifo[j] = domainState->fifoData[i];
+                sendData[j] = domainState->fifoData[i];
             }
             
             
+            header.data.length = toRead;
             NetSendSource source;
-            source.bufferLength = toRead;
-            source.buffer = (char*)domainState->submitFifo;
+            source.bufferLength = sizeof(Message);
+            source.buffer = (char*)&header;
             
             
             
             //printf("%hd %hd %hd\n", ((int16*)(domainState->fifoData+domainState->tail))[0], ((int16*)(domainState->fifoData+domainState->tail))[1], ((int16*)(domainState->fifoData+domainState->tail))[2]);
             
-            
-            while(netSend(&domainState->localSocket, &source) != NetResultType_Ok){
-                printf("send error, fix me and repeat\n");
-                sleep(10);
+            NetResultType result;
+            bool cont = false;
+            while((result = netSend(&domainState->localSocket, &source)) != NetResultType_Ok){
+                printf("send error\n");
+                if(result == NetResultType_Closed){
+                    closeSocket(&domainState->localSocket);
+                    if(!openSocket(&domainState->localSocket, &settings)){
+                        printf("falied to open local socket\n");
+                        go &= false;
+                        return;
+                    }
+                    printf("socket closed, reconnecting \n");
+                    connectToServer(&go);
+                    cont = true;
+                    break;
+                }else{
+                    sleep(1);
+                }
             }
             
-            domainState->tail += toRead;
-            domainState->tail %= ARRAYSIZE(domainState->fifoData);
-            FETCH_AND_ADD(&domainState->fifoCount, -toRead);
+            if(!cont){
+                
+                source.bufferLength = toRead;
+                source.buffer = sendData;
+                
+                while((result = netSend(&domainState->localSocket, &source)) != NetResultType_Ok){
+                    printf("send error\n");
+                    if(result == NetResultType_Closed){
+                        closeSocket(&domainState->localSocket);
+                        if(!openSocket(&domainState->localSocket, &settings)){
+                            printf("falied to open local socket\n");
+                            go &= false;
+                            return;
+                        }
+                        printf("socket closed, reconnecting \n");
+                        connectToServer(&go);
+                        cont = true;
+                        break;
+                    }else{
+                        sleep(1);
+                    }
+                }
+                
+                if(!cont){
+                    domainState->tail += toRead;
+                    domainState->tail %= ARRAYSIZE(domainState->fifoData);
+                    FETCH_AND_ADD(&domainState->fifoCount, -toRead);
+                }
+            }
         }
         
         

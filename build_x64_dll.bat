@@ -12,7 +12,7 @@ set unique=%preunique:~0,2%%preunique:~3,2%%preunique:~6,2%%preunique:~9,2%
 
 
 rem CANNOT USE SOME C++ FEATURES, std lib is ripped off (https://hero.handmade.network/forums/code-discussion/t/94)
-call cl.exe /nologo /W2 /WX /EHa- /GS- /GR- /Od /Zi /FS /DSERVER /I %BASELIB%  /I %LIBDIR% /Fd"gamecode_%unique%.pdb" /Feservercode.dll %FILES%  /link /INCREMENTAL:NO /NODEFAULTLIB /DLL %LIBS% /PDB:"gamecode_%unique%.pdb"
+call cl.exe /nologo /W2 /WX /EHa- /GS- /GR- /Od /Zi /FS /DSERVER /I %BASELIB%  /I %LIBDIR% /Fd"gamecode_%unique%.pdb" /Feservercode.dll %FILES%  /MTd /link /INCREMENTAL:NO /NODEFAULTLIB /DLL %LIBS% /PDB:"gamecode_%unique%.pdb"
 
 
 POPD
