@@ -58,6 +58,8 @@ extern "C"{
 #include "windows_time.cpp"
 #include "util_conv.cpp"
 
+#include "xbs2.cpp"
+
 //{4d36e97e-e325-11ce-bfc1-08002be10318}
 DEFINE_GUID(GUID_OTHER, 0x4d36e97e, 0xe325, 0x11ce, 0xbf, 0xc1, 0x08, 0x00, 0x2b, 0xe1, 0x03, 0x18);
 //88bae032-5a81-49f0-bc3d-a4ff138216d6
@@ -99,9 +101,32 @@ bool quit;
 
 Context context;
 
+bool openHandle(const char * addr, HANDLE * result){
+    HANDLE serial  = CreateFile(addr, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, FILE_FLAG_NO_BUFFERING, NULL);
+    if(serial != INVALID_HANDLE_VALUE){
+        *result = serial;
+        return true;
+    }
+    return false;
+}
 
+bool setRate(HANDLE * target, int32 rate){
+    //DWORD BaudRates[] = {1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200};
+    DCB settings;
+    if(GetCommState(*target, &settings)){
+        if(settings.BaudRate != rate){
+            settings.BaudRate = rate;
+            bool result = SetCommState(*target, &settings);
+            ASSERT(GetCommState(*target, &settings) && settings.BaudRate == rate);
+            return result;
+        }
+        return true;
+    }
+    return false;
+}
 
 static inline int main(LPWSTR * argvW, int argc) {
+    
     
     LPVOID memoryStart = VirtualAlloc(NULL, TEMP_MEM + PERSISTENT_MEM + STACK_MEM, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
     bool memory = memoryStart != NULL;
@@ -142,7 +167,230 @@ static inline int main(LPWSTR * argvW, int argc) {
     
     
     if(initSuccess && argvSuccess && privileges){
+        XBS2Handle serial;
+        if(openHandle("\\\\?\\COM4", &serial.handle)){
+            /*NOTE: Failure to enter AT Command Mode is most commonly due to baud rate mismatch. Ensure the
+                    Baud’ setting on the “PC Settings” tab matches the interface data rate of the RF module. By default,
+                the BD parameter = 3 (9600 bps).
+                */
+            if(setRate(&serial.handle, 9600)){
+                xbs2_setup(&serial);
+            }
+            
+        }
+        XBS2Handle serial2;
+        if(openHandle("\\\\?\\COM5", &serial2.handle)){
+            /*NOTE: Failure to enter AT Command Mode is most commonly due to baud rate mismatch. Ensure the
+                    Baud’ setting on the “PC Settings” tab matches the interface data rate of the RF module. By default,
+                the BD parameter = 3 (9600 bps).
+                */
+            if(setRate(&serial2.handle, 9600)){
+                xbs2_setup(&serial2);
+            }
+            
+        }
         
+        xbs2_transmitMessage(&serial2, serial.sidLower, "ahoj\r");
+        
+        char buffer[10] = {};
+        
+        waitForAnyMessage(&serial, buffer);
+        
+        int i = 0;
+        
+#if 0
+        
+        HANDLE serial  = CreateFile("\\\\?\\COM3", GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, FILE_FLAG_NO_BUFFERING, NULL);
+        if(serial != INVALID_HANDLE_VALUE){
+            
+            //DWORD BaudRates[] = {1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200};
+            
+            DCB settings;
+            if(GetCommState(serial, &settings)){
+                if(settings.BaudRate != 9600){
+                    settings.BaudRate = 9600;
+                    ASSERT(SetCommState(serial, &settings));
+                    ASSERT(GetCommState(serial, &settings) && settings.BaudRate == 9600);
+                    int i = 0;
+                }
+                
+                /*NOTE: Failure to enter AT Command Mode is most commonly due to baud rate mismatch. Ensure the
+                    Baud’ setting on the “PC Settings” tab matches the interface data rate of the RF module. By default,
+                the BD parameter = 3 (9600 bps).
+                
+                
+                    When a command is sent to the module, the module will parse and execute
+                    the command. Upon successful execution of a command, the module returns an “OK” message. If
+                    execution of a command results in an error, the module returns an “ERROR” message.
+                    
+                    */
+                
+                //1 enter command mode
+                
+                unsigned char result[70] = {};
+                OVERLAPPED commStatus = {};
+                
+                //a 1 second pause [GT (Guard Times) parameter]
+                //b "+++"
+                //c second pause
+                unsigned char buffer[20] = "+++";
+                float32 start = getProcessCurrentTime();
+                while(getProcessCurrentTime() - start < 1){
+                    
+                }
+                DWORD trash;
+                if(WriteFile(serial, buffer, strlen((const char *)buffer), &trash, NULL))
+                {
+                    
+                    
+                    start = getProcessCurrentTime();
+                    while(getProcessCurrentTime() - start < 1){
+                        
+                    }
+                    DWORD offset  = 0;
+                    
+                    while(strcmp((const char*)result + offset - 3, "OK\r") != 0 && ReadFile(serial, result + offset, 70 - offset, &trash, NULL)){
+                        offset += trash;
+                    }
+                    
+                    
+                    //low factory address "ATSH\r"
+                    strcpy((char *)buffer, "ATSH\r");
+                    ASSERT(WriteFile(serial, buffer, strlen((const char *)buffer), &trash, NULL));
+                    
+                    
+                    //high factory address "ATSL\r"
+                    strcpy((char *)buffer, "ATSL\r");
+                    ASSERT(WriteFile(serial, buffer, strlen((const char *)buffer), &trash, NULL));
+                    
+                    
+                    //"ATVR\r" firmware version
+                    strcpy((char *)buffer, "ATVR\r");
+                    ASSERT(WriteFile(serial, buffer, strlen((const char *)buffer), &trash, NULL));
+                    
+                    //"ATHV\r" hardware version
+                    strcpy((char *)buffer, "ATHV\r");
+                    ASSERT(WriteFile(serial, buffer, strlen((const char *)buffer), &trash, NULL));
+                    
+                    //"ATCN\r" exit command mode
+                    strcpy((char *)buffer, "ATCN\r");
+                    ASSERT(WriteFile(serial, buffer, strlen((const char *)buffer), &trash, NULL));
+                    
+                    offset = 0;
+                    while(strcmp((const char*)result + offset - 3, "OK\r") != 0 && ReadFile(serial, result + offset, 70 - offset, &trash, NULL)){
+                        offset += trash;
+                    }
+                    int i = 0;
+                    
+                    
+                }
+                
+                
+                
+            }
+            
+            
+            
+        }
+#endif
+        
+#if 0
+        HANDLE serial = CreateFile("\\\\?\\COM3", GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, FILE_FLAG_NO_BUFFERING | FILE_FLAG_OVERLAPPED, NULL);
+        if(serial != INVALID_HANDLE_VALUE){
+            DCB settings;
+            if(GetCommState(serial, &settings)){
+                if(settings.BaudRate != 9600){
+                    settings.BaudRate = 9600;
+                    ASSERT(SetCommState(serial, &settings));
+                    ASSERT(GetCommState(serial, &settings) && settings.BaudRate == 9600);
+                    int i = 0;
+                }
+                
+                /*NOTE: Failure to enter AT Command Mode is most commonly due to baud rate mismatch. Ensure the
+                Baud’ setting on the “PC Settings” tab matches the interface data rate of the RF module. By default,
+                the BD parameter = 3 (9600 bps).
+                
+                
+                When a command is sent to the module, the module will parse and execute
+                the command. Upon successful execution of a command, the module returns an “OK” message. If
+                execution of a command results in an error, the module returns an “ERROR” message.
+                
+                */
+                
+                //1 enter command mode
+                
+                unsigned char result[70] = {};
+                OVERLAPPED commStatus = {};
+                
+                //a 1 second pause [GT (Guard Times) parameter]
+                //b "+++"
+                //c second pause
+                unsigned char buffer[20] = "+++";
+                float32 start = getProcessCurrentTime();
+                while(getProcessCurrentTime() - start < 1){
+                    
+                }
+                if(WriteFile(serial, buffer, strlen((const char *)buffer), NULL, &commStatus) == 0 && GetLastError() == ERROR_IO_PENDING)
+                {
+                    DWORD trash;
+                    if(GetOverlappedResult(serial, &commStatus, &trash, true)){
+                        start = getProcessCurrentTime();
+                        while(getProcessCurrentTime() - start < 1){
+                            
+                        }
+                        if(ReadFile(serial, result, 70, NULL, &commStatus) == 0  && GetLastError() == ERROR_IO_PENDING){
+                            
+                            if(GetOverlappedResult(serial, &commStatus, &trash, true)){
+                                
+                                
+                                //low factory address "ATSL\r"
+                                strcpy((char *)buffer, "ATSL\r");
+                                ASSERT(WriteFile(serial, buffer, strlen((const char *)buffer), NULL, &commStatus) == 0 && GetLastError() == ERROR_IO_PENDING);
+                                ASSERT(GetOverlappedResult(serial, &commStatus, &trash, true));
+                                
+                                //high factory address "ATSH\r"
+                                strcpy((char *)buffer, "ATSH\r");
+                                ASSERT(WriteFile(serial, buffer, strlen((const char *)buffer), NULL, &commStatus) == 0 && GetLastError() == ERROR_IO_PENDING);
+                                ASSERT(GetOverlappedResult(serial, &commStatus, &trash, true));
+                                
+                                //"ATVR\r" firmware version
+                                strcpy((char *)buffer, "ATVR\r");
+                                ASSERT(WriteFile(serial, buffer, strlen((const char *)buffer), NULL, &commStatus) == 0 && GetLastError() == ERROR_IO_PENDING);
+                                ASSERT(GetOverlappedResult(serial, &commStatus, &trash, true));
+                                
+                                //"ATHV\r" hardware version
+                                strcpy((char *)buffer, "ATHV\r");
+                                ASSERT(WriteFile(serial, buffer, strlen((const char *)buffer), NULL, &commStatus) == 0 && GetLastError() == ERROR_IO_PENDING);
+                                ASSERT(GetOverlappedResult(serial, &commStatus, &trash, true));
+                                
+                                while(ReadFile(serial, result, 70, NULL, &commStatus) == 0 && GetLastError() == ERROR_IO_PENDING){
+                                    if(GetOverlappedResult(serial, &commStatus, &trash, true)){
+                                        int i = 0;
+                                    }
+                                }
+                                //"ATCN\r" exit command mode
+                                strcpy((char *)buffer, "ATHV\r");
+                                ASSERT(WriteFile(serial, buffer, strlen((const char *)buffer), NULL, &commStatus) == 0 && GetLastError() == ERROR_IO_PENDING);
+                                ASSERT(GetOverlappedResult(serial, &commStatus, &trash, true));
+                                
+                                while(ReadFile(serial, result, 70, NULL, &commStatus) == 0 && GetLastError() == ERROR_IO_PENDING){
+                                    if(GetOverlappedResult(serial, &commStatus, &trash, true)){
+                                        int i = 0;
+                                    }
+                                }
+                                
+                            }
+                        }
+                    }
+                    
+                }
+            }
+            
+            
+            
+        }
+#endif
+#if 0
         bool foundDevice = false;
         char address[1024];
         
@@ -191,42 +439,124 @@ static inline int main(LPWSTR * argvW, int argc) {
         
         if(foundDevice){
             
-            HANDLE usbROOTfile = CreateFile(address, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, FILE_FLAG_NO_BUFFERING | FILE_FLAG_OVERLAPPED, NULL);
+            HANDLE beaconSystemHandle = CreateFile(address, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, FILE_FLAG_NO_BUFFERING | FILE_FLAG_OVERLAPPED, NULL);
             
-            if(INVALID_HANDLE_VALUE != usbROOTfile){
-                WINUSB_INTERFACE_HANDLE usbROOTHandle;
+            
+            if(INVALID_HANDLE_VALUE != beaconSystemHandle){
+                WINUSB_INTERFACE_HANDLE usbHandle;
                 
-                if(WinUsb_Initialize(usbROOTfile, &usbROOTHandle)){
-                    WINUSB_INTERFACE_HANDLE deviceHandle;
-                    if(WinUsb_GetAssociatedInterface(&usbROOTHandle, 0, &deviceHandle)){
-                        //readPipe
-                        /*WinUsb_ReadPipe(
-                            _In_      WINUSB_INTERFACE_HANDLE InterfaceHandle,
-                            _In_      UCHAR                   PipeID,
-                            _Out_     PUCHAR                  Buffer,
-                            _In_      ULONG                   BufferLength,
-                            _Out_opt_ PULONG                  LengthTransferred,
-                            _In_opt_  LPOVERLAPPED            Overlapped
-                            );
-                            */
-                        WinUsb_Free(deviceHandle);
+                
+                if(WinUsb_Initialize(beaconSystemHandle, &usbHandle)){
+                    
+                    
+                    //https://docs.microsoft.com/en-us/windows-hardware/drivers/usbcon/using-winusb-api-to-communicate-with-a-usb-device
+                    USB_INTERFACE_DESCRIPTOR setting;
+                    uint8 inPipe;
+                    uint8 outPipe;
+                    bool outSet = false;
+                    bool inSet = false;
+                    if(WinUsb_QueryInterfaceSettings(usbHandle, 0, &setting)){
+                        for(uint8 endpointIndex = 0; endpointIndex < setting.bNumEndpoints; endpointIndex++){
+                            WINUSB_PIPE_INFORMATION pipeInformation;
+                            if(WinUsb_QueryPipe(usbHandle, setting.bInterfaceNumber, endpointIndex, &pipeInformation)){
+                                if(USB_ENDPOINT_DIRECTION_IN(pipeInformation.PipeId)){
+                                    inPipe = pipeInformation.PipeId;
+                                    inSet = true;
+                                }else if(USB_ENDPOINT_DIRECTION_OUT(pipeInformation.PipeId)){
+                                    outPipe = pipeInformation.PipeId;
+                                    outSet = true;
+                                }
+                            }
+                        }
                         
+                        if(outSet && inSet){
+                            ULONG trash;
+                            //pipe policy - raw data?
+                            //https://msdn.microsoft.com/en-us/library/windows/hardware/ff540304(v=vs.85).aspx setpolicy
+                            //policy options https://docs.microsoft.com/en-us/windows-hardware/drivers/usbcon/winusb-functions-for-pipe-policy-modification
+                            
+                            
+                            /*
+                            NOTE: Failure to enter AT Command Mode is most commonly due to baud rate mismatch. Ensure the
+                            Baud’ setting on the “PC Settings” tab matches the interface data rate of the RF module. By default,
+                            the BD parameter = 3 (9600 bps).
+                            
+                            
+                            When a command is sent to the module, the module will parse and execute
+                            the command. Upon successful execution of a command, the module returns an “OK” message. If
+                            execution of a command results in an error, the module returns an “ERROR” message.
+                            
+                            */
+                            
+                            //1 enter command mode
+                            
+                            unsigned char result[70] = {};
+                            
+                            //a 1 second pause [GT (Guard Times) parameter]
+                            //b "+++"
+                            //c second pause
+                            unsigned char buffer[20] = "+++\r";
+                            if(WinUsb_WritePipe(usbHandle, outPipe, buffer, strlen((const char *)buffer), &trash, NULL))
+                            {
+                                float32 start = getProcessCurrentTime();
+                                while(getProcessCurrentTime() - start < 1){
+                                    
+                                }
+                                strcpy((char *)buffer, "ATDL\r");
+                                if(WinUsb_WritePipe(usbHandle, outPipe, buffer, strlen((const char *)buffer), &trash, NULL))
+                                {
+                                    while(WinUsb_ReadPipe(usbHandle, inPipe, result, 70, &trash, NULL)){
+                                        int i = 0;
+                                    }
+                                    int i = 0;
+                                    
+                                }
+                            }
+                            
+                            
+                            
+                            
+                            int i = 0;
+                            
+                            
+                            //commands
+                            //low factory address "ATSL\r"
+                            //high factory address "ATSH\r"
+                            
+                            //"ATVR\r" firmware version
+                            //"ATHV\r" hardware version
+                            
+                            
+                            
+                            //exit command mode
+                            /*
+                            Send the ATCN (Exit Command Mode) command (followed by a carriage return).
+                            [OR]
+                            2. If no valid AT Commands are received within the time specified by CT (Command Mode
+                            Timeout) Command, the RF module automatically returns to Idle Mode.
+                            */
+                            
+                        }
+                        
+                        
+                        WinUsb_Free(usbHandle);
                     }
-                    WinUsb_Free(usbROOTHandle);
+                    
+                    
                 }
                 
                 
                 
-                
-                CloseHandle(usbROOTfile);
+                CloseHandle(beaconSystemHandle);
             }
             
         }
         
         
-        
+#endif
         
     }
+    
     
     if (!VirtualFree(memoryStart, 0, MEM_RELEASE)) {
         //more like log it
