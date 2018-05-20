@@ -3,11 +3,9 @@
 
 #include "util_time.h"
 
+#include "util_serial.h"
 
-struct XBS2Handle{
-    //platform, lib specific handles
-    HANDLE handle;
-    //xbs2 specific stuff
+struct XBS2Handle : SerialHandle{
     char sidLower[9];
 };
 
@@ -80,11 +78,16 @@ static void xbs2_exitCommandMode(XBS2Handle * module){
 
 
 void xbs2_transmitMessage(XBS2Handle * source, const char * lowerAddress, const char * message){
+    char res[20];
+    
     xbs2_enterCommandMode(source);
     char buff[14];
     sprintf(buff, "ATDL%8s\r", lowerAddress);
     ASSERT(xbs2_sendMessage(source, buff));
+    
+    waitForAnyMessage(source, res);
     xbs2_exitCommandMode(source);
+    
     
     ASSERT(xbs2_sendMessage(source, message));
 }
@@ -119,7 +122,6 @@ void xbs2_setup(XBS2Handle * module){
     ASSERT(xbs2_sendMessage(module, "ATRE\r"));
     waitForMessage(module, result, "OK\r");
     
-    
     //reset power
     ASSERT(xbs2_sendMessage(module, "ATFR\r"));
     waitForMessage(module, result, "OK\r");
@@ -151,6 +153,10 @@ void xbs2_setup(XBS2Handle * module){
     sscanf(result, "%9[^\r]", add);
     sprintf(buff, "ATDH%8s\r", add);
     ASSERT(xbs2_sendMessage(module, buff));
+    waitForMessage(module, result, "OK\r");
+    
+    //send bytes as they arrive
+    ASSERT(xbs2_sendMessage(module, "ATRO0\r"));
     waitForMessage(module, result, "OK\r");
     
     xbs2_exitCommandMode(module);
