@@ -9,6 +9,7 @@ struct XBS2Handle : SerialHandle{
     char sidLower[9];
     float32 guardTime;
     uint32 baudrate;
+    uint16 frequency;
     char channel[3];
     char pan[5];
 };
@@ -120,23 +121,81 @@ void xbs2_transmitMessage(XBS2Handle * source, const char * lowerAddress, const 
     ASSERT(xbs2_sendMessage(source, message));
 }
 
-bool xbs2_initNework(XBS2Handle * module){
+bool xbs2_initNetwork(XBS2Handle * module, char * channelMask = "1FFE"){
     if(xbs2_enterCommandMode(module)){
         //reset nework defaults
-        ASSERT(xbs2_sendMessage(module, "ATNR0\r"));
-        waitForMessage(module, result, "OK\r");
-        ASSERT(xbs2_enterCommandMode(module));
+        char result[70] = {};
+        bool success = true;
         
-        //result status "ATAI\r"
-        ASSERT(xbs2_sendMessage(module, "ATAI\r"));
-        waitForAnyMessage(module, result);
-        //we connected ok to the network
-        ASSERT(!strcmp_n("0\r", result, 2));
+        char command[10];
+        success = success && sprintf(command, "ATSC%4s\r", channelMask) == 1 && xbs2_sendMessage(module, command)  && waitForAnyMessage(module, result) > 0 && !strcmp_n("OK\r", result, 3);
         
-        // operating channel
-        success = success && xbs2_sendMessage(module, "ATCH\r") && waitForAnyMessage(module, result, module->guardTime) > 0 && sscanf(result, "%5[^\r]", module->channel) == 1;
+        success = success && xbs2_sendMessage(module, "ATNR0\r")  && waitForAnyMessage(module, result) > 0 && !strcmp_n("OK\r", result, 3);
         
-        xbs2_exitCommandMode(module);
+        //wait for network restart
+        wait(1);
+        
+        if(success && xbs2_enterCommandMode(module)){
+            
+            success = success && xbs2_sendMessage(module, "ATAI\r")  && waitForAnyMessage(module, result) > 0 && !strcmp_n("0\r", result, 2); 
+            
+            // operating channel
+            success = success && xbs2_sendMessage(module, "ATCH\r") && waitForAnyMessage(module, result) > 0 && sscanf(result, "%5[^\r]", module->channel) == 1;
+            if(success){
+                /**
+            bit flag (channel)
+            0 (0x0B) 4 (0x0F) 8 (0x13) 12 (0x17)
+                1 (0x0C) 5 (0x10) 9 (0x14) 13 (0x18)
+                2 (0x0D) 6 (0x11) 10 (0x15) 14 (0x19)
+                3 (0x0E) 7 (0x12) 11 (0x16) 15 (0x1A)
+                
+                */
+                if(!strcmp_n(module->channel, "B", 2)){
+                    module->frequency = 2405;
+                }else if(!strcmp_n(module->channel, "C", 2)){
+                    module->frequency = 2410;
+                }else if(!strcmp_n(module->channel, "D", 2)){
+                    module->frequency = 2415;
+                }else if(!strcmp_n(module->channel, "E", 2)){
+                    module->frequency = 2420;
+                }else if(!strcmp_n(module->channel, "F", 2)){
+                    module->frequency = 2425;
+                }else if(!strcmp_n(module->channel, "10", 2)){
+                    module->frequency = 2430;
+                }else if(!strcmp_n(module->channel, "11", 2)){
+                    module->frequency = 2435;
+                }else if(!strcmp_n(module->channel, "12", 2)){
+                    module->frequency = 2440;
+                }else if(!strcmp_n(module->channel, "13", 2)){
+                    module->frequency = 2445;
+                }else if(!strcmp_n(module->channel, "14", 2)){
+                    module->frequency = 2450;
+                }else if(!strcmp_n(module->channel, "15", 2)){
+                    module->frequency = 2455;
+                }else if(!strcmp_n(module->channel, "16", 2)){
+                    module->frequency = 2460;
+                }else if(!strcmp_n(module->channel, "17", 2)){
+                    module->frequency = 2465;
+                }else if(!strcmp_n(module->channel, "18", 2)){
+                    module->frequency = 2470;
+                }else if(!strcmp_n(module->channel, "19", 2)){
+                    module->frequency = 2475;
+                }else if(!strcmp_n(module->channel, "1A", 2)){
+                    module->frequency = 2480;
+                }
+            }
+            
+            // pan id
+            success = success && xbs2_sendMessage(module, "ATID\r") && waitForAnyMessage(module, result) > 0 && sscanf(result, "%7[^\r]", module->pan) == 1;
+            
+            
+            xbs2_exitCommandMode(module);
+        }else{
+            if(!success) xbs2_exitCommandMode(module);
+            return false;
+        }
+        
+        return success;
     }else{
         return false;
     }
@@ -154,9 +213,6 @@ bool xbs2_readValues(XBS2Handle * module){
         
         //low factory address "ATSL\r"
         success = success && xbs2_sendMessage(module, "ATSL\r") && waitForAnyMessage(module, result) > 0 && sscanf(result, "%9[^\r]", module->sidLower) == 1;
-        
-        // pan id
-        success = success && xbs2_sendMessage(module, "ATID\r") && waitForAnyMessage(module, result) > 0 && sscanf(result, "%7[^\r]", module->pan) == 1;
         
         xbs2_exitCommandMode(module);
         return success;
@@ -199,6 +255,9 @@ bool xbs2_initModule(XBS2Handle * module){
             
             //disable flow control flags
             success = success && xbs2_sendMessage(module, "ATD70\r") && waitForAnyMessage(module, result) > 0 && !strcmp_n("OK\r", result, 3);
+            
+            //broadcast hops - max 1
+            success = success && xbs2_sendMessage(module, "ATBH0\r") && waitForAnyMessage(module, result) > 0 && !strcmp_n("OK\r", result, 3);
             
             //all modules have same high addressw set as destination address
             success = success && xbs2_sendMessage(module, "ATSH\r") && waitForAnyMessage(module, result) > 0;
