@@ -1,8 +1,8 @@
 rem call build_remote_pi.bat
 
-rem call build_x64_debug.bat
+CALL BUILD_X64_DEBUG.BAT
 
-rem call build_x64_dll.bat
+CALL BUILD_X64_DLL.BAT
 
-call build_x64_beacons.bat
+REM CALL BUILD_X64_BEACONS.BAT
 

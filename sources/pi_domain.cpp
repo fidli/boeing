@@ -11,7 +11,7 @@
 #include "util_filesystem.h"
 #include "util_net.h"
 #include "util_thread.h"
-
+#include "xbs2.cpp"
 
 struct DomainState{
     MPU6050Handle memsHandle;
@@ -23,6 +23,11 @@ struct DomainState{
     uint16 fifoCount;
     bool haltPolling;
     bool pollHalted;
+    
+    XBS2Handle xb;
+    uint16 xbFreq;
+    char channel[3];
+    char pan[5];
     
 };
 
@@ -101,12 +106,27 @@ void connectToServer(volatile bool * go){
     Message namasteMessage;
     namasteMessage.type = MessageType_Init;
     namaste.bufferLength = sizeof(namasteMessage.reserved) + sizeof(namasteMessage.init);
-    sprintf(namasteMessage.init.name, "61.68");
+    namasteMessage.init.name = '1';
     namasteMessage.init.settings = domainState->memsHandle.settings;
     namaste.buffer = (char*) &namasteMessage;
     while(true){
         NetResultType subRes = netSend(&domainState->localSocket, &namaste);
         if(subRes == NetResultType_Ok || subRes == NetResultType_Closed){
+            
+            //accept christ blood and body in form of module settings
+            Message xbs2settings;
+            NetRecvResult result;
+            result.bufferLength = sizeof(Message);
+            result.buffer = (char *)&xbs2settings;
+            
+            NetResultType resultCode = netRecv(&args->socket, &result);
+            while(resultCode != NetResultType_Ok);
+            programContext->xbFreq = xbs2settings.info.beacon.frequency;
+            strcpy_n(programContext->channel, xbs2settings.info.beacon.channel, 3);
+            strcpy_n(programContext->pan, xbs2settings.info.beacon.pan, 5);
+            
+            
+            
             printf("init message sent\n");
             break;
         }

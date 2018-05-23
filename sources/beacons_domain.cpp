@@ -33,9 +33,6 @@ extern "C"{
 };
 
 #include "common.h"
-#define PERSISTENT_MEM MEGABYTE(1)
-#define TEMP_MEM MEGABYTE(98)
-#define STACK_MEM MEGABYTE(1)
 
 
 
@@ -44,51 +41,74 @@ extern "C"{
 #include "util_string.cpp"
 #include "xbs2.cpp"
 
+#include "util_io.cpp"
+#include "util_string.cpp"
 
 
+#include "messages.h"
+
+#include "util_net.h"
+
+LocalTime lt;
+char logbuffer[1024];
+#define LOG(message)  lt = getLocalTime(); sprintf(logbuffer, "[%2hu.%2hu.%4hu %2hu:%2hu:%2hu] %900s\r\n", lt.day, lt.month, lt.year, lt.hour, lt.minute, lt.second, (message)); print(logbuffer);
 
 struct State{
     XBS2Handle * coordinator;
     XBS2Handle serials[4];
     bool  inited;
+    NetSocket serverConnection;
 };
 
 State * state;
 
 extern "C" __declspec(dllexport) bool initDomain(void * platformMemory){
     initMemory(platformMemory);
+    if(!initIo()){
+        return false;
+    }
     if(!initTime()) return false;
+    if(!initNet()) return false;
     state = (State *) platformMemory;
     ASSERT(sizeof(State) <= PERSISTENT_MEM);
     
-    char coms[4][6] = {"COM5", "COM6", "COM8", "COM9"};
+    char coms[4][6] = {"COM3", "COM4", "COM5", "COM6"};
     char coordinator[] = "400A3EF2";
     
     char path[10];
     if(!state->inited){
+#if 1
+        LOG("initing network");
         for(uint8 serialIndex = 0; serialIndex < ARRAYSIZE(coms); serialIndex++){
             XBS2Handle * beacon = &state->serials[serialIndex];
             if(isHandleOpened(beacon)) continue;
             //this is actually windows specific, ignore for now
+            LOG("opening handle");
             sprintf(path, "\\\\?\\%5s", coms[serialIndex]);
+            LOG(path);
             if(openHandle(path, beacon)){
                 if(xbs2_detectAndSetStandardBaudRate(beacon)){
                     if (!xbs2_initModule(beacon)){
+                        LOG("failed to init module");
                         closeHandle(beacon);
                         return false;
                     }
                     if (!xbs2_readValues(beacon)){
+                        LOG("failed to read module values");
                         closeHandle(beacon);
                         return false;
                     }if(!strcmp_n(coordinator, beacon->sidLower, 8)){
                         state->coordinator = beacon;
                     }
+                    LOG("handle opened and module inited");
                     continue;
                 }
             }
+            LOG("Failed to open handle");
             return false;
         }
         
+        LOG("finding channel");
         //find coordinator and reset network
         while(!xbs2_initNetwork(state->coordinator));
         
@@ -135,18 +155,61 @@ extern "C" __declspec(dllexport) bool initDomain(void * platformMemory){
             strcpy(channelMask, "8000");
         }
         
+        LOG("found channel");
+        LOG(state->coordinator->channel);
+        LOG("pan id");
+        LOG(state->coordinator->pan);
+        
         //reset network on others
         for(uint8 serialIndex = 0; serialIndex < ARRAYSIZE(coms); serialIndex++){
             XBS2Handle * beacon = &state->serials[serialIndex];
             if(beacon != state->coordinator){
+                LOG("joining network with");
+                LOG(beacon->sidLower);
                 while(!xbs2_initNetwork(beacon, channelMask) || (strcmp_n(state->coordinator->pan, beacon->pan, 5) != 0 || strcmp_n(state->coordinator->channel, beacon->channel, 3) != 0));
                 beacon->frequency = state->coordinator->frequency;
+                LOG("success");
             }
         }
         //all set
         //check network topology?
-        state->inited = true;
+#endif
+        LOG("XBS2 set. Connecting to the server");
+        //todo connect to server, annonce settings
+        NetSocketSettings connectionSettings;
+        connectionSettings.reuseAddr = true;
+        connectionSettings.blocking = true;
+        LOG("opening socket");
+        if(!openSocket(&state->serverConnection, &connectionSettings)){
+            LOG("opening socket failed");
+            return false;
+        }
+        LOG("connecting to server");
+        if(!tcpConnect(&state->serverConnection, "10.0.0.10", "25555")){
+            LOG("connecting to server failed");
+            return false;
+        }
         
+        LOG("connection successfull. Sending handshake message");
+        
+        Message handshake;
+        
+        handshake.type = MessageType_Init;
+        handshake.init.clientType = ClientType_Beacon;
+        handshake.init.beacon.frequency = state->coordinator->frequency;
+        strcpy_n(handshake.init.beacon.channel, state->coordinator->channel, 3);
+        strcpy_n(handshake.init.beacon.pan, state->coordinator->pan, 5);
+        
+        NetSendSource message;
+        message.buffer = (char*)&handshake;
+        message.bufferLength = sizeof(Message);
+        
+        if(netSend(&state->serverConnection, &message) != NetResultType_Ok){
+            LOG("failed to send handshake message");
+        }
+        
+        LOG("all set.");
+        state->inited = true;
     }
     return state->inited;
 }

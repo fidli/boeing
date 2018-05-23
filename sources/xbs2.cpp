@@ -259,6 +259,9 @@ bool xbs2_initModule(XBS2Handle * module){
             //broadcast hops - max 1
             success = success && xbs2_sendMessage(module, "ATBH0\r") && waitForAnyMessage(module, result) > 0 && !strcmp_n("OK\r", result, 3);
             
+            //broadcast destination address
+            success = success && xbs2_sendMessage(module, "ATDLFFFF\r") && waitForAnyMessage(module, result) > 0 && !strcmp_n("OK\r", result, 3);
+            
             //all modules have same high addressw set as destination address
             success = success && xbs2_sendMessage(module, "ATSH\r") && waitForAnyMessage(module, result) > 0;
             if(success){

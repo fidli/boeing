@@ -168,6 +168,7 @@ static inline int main(LPWSTR * argvW, int argc) {
                         iterateDomain = (void(*)(void))GetProcAddress(temp, "iterateDomain");
                         if(initDomain && iterateDomain){
                             domainCode = temp;
+                            print("Domain code reloaded\r\n");
                         }
                     }
                     

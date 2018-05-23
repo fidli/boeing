@@ -86,9 +86,10 @@ struct ProgramContext{
     NetSocket server;
     Thread serverThread;
     BitmapFont font;
+    Mutex moduleMutex;
     struct Module{
         
-        char name[10];
+        char name;
         MPU6050Settings settings;
         
         v3 orientation;
@@ -119,6 +120,16 @@ struct ProgramContext{
         bool run;
     } modules[1];
     
+    struct Beacon{
+        uint16 frequency;
+        char channel[4];
+        char pan[5];
+        v3 position;
+    } beacons[4];
+    
+    NetSocket beaconsSocket;
+    Thread beaconsThread;
+    
     bool close;
     bool * quit;
     Image * renderingTarget;
@@ -128,98 +139,165 @@ struct ProgramContext{
 
 ProgramContext * programContext;
 
-void client(ProgramContext::Module * module){
+struct ClientArg{
+    NetSocket socket;
+    Thread thread;
+};
+
+void client(const ClientArg * args){
+    
     NetRecvResult result;
-    result.bufferLength = sizeof(Message); //full fifo + additional header sizes
+    result.bufferLength = sizeof(Message);
     PUSHI;
     char * resultBuffer = result.buffer = &PUSHA(char, result.bufferLength);
     
     char * dataBuffer = &PUSHA(char, 4092);
     
+    ClientType clientType;
     
-    while(!*programContext->quit && module->run  && !programContext->close){
+    ProgramContext::Module * module = NULL;
+    
+    while(!*programContext->quit && (module == NULL || module->run)  && !programContext->close){
         result.bufferLength = sizeof(Message);
-        NetResultType resultCode = netRecv(&module->socket, &result);
+        NetResultType resultCode = netRecv(&args->socket, &result);
         if(resultCode == NetResultType_Ok){
             
             Message * wrap = (Message *) result.buffer;
             switch(wrap->type){
                 case MessageType_Init:{
-                    strcpy(module->name, wrap->init.name);
-                    module->settings = wrap->init.settings;
-                    ASSERT(wrap->init.settings.sampleRate == 250);
-                    module->tailIndex = 0;
-                    module->headIndex = 0;
-                    module->stepsAvailable = 0;
-                    module->physicalFrame = 0;
-                    //default attributes
                     
-                    module->orientation = V3(0, 0, 0);
-                    module->position = V3(0, 0, 0);
-                    module->velocity = V3(0, 0, 0);
-                    module->acceleration = V3(0, 0, 0);
+                    clientType = wrap->init.clientType;
                     
-                    module->accelerationBiasLower = {};
-                    module->accelerationBias = {};
-                    module->accelerationBiasUpper = {};
-                    
-                    module->gyroBiasLower = {};
-                    module->gyroBias = {};
-                    module->gyroBiasUpper = {};
+                    if(clientType == ClientType_Boeing){
+                        
+                        lock(&programContext->moduleMutex);
+                        
+                        bool found = false;
+                        uint32 i = 0;
+                        for(; i < ARRAYSIZE(programContext->modules); i++){
+                            if(!programContext->modules[i].run){
+                                found = true;
+                                break;
+                            }
+                        }
+                        unlock(&programContext->moduleMutex);
+                        ASSERT(found);
+                        
+                        
+                        module = &programContext->modules[i];
+                        module->run = true;
+                        module->socket = args->socket;
+                        module->thread = args->thread;
+                        
+                        module->name = wrap->init.boeing.name;
+                        module->settings = wrap->init.boeing.settings;
+                        ASSERT(wrap->init.boeing.settings.sampleRate == 250);
+                        module->tailIndex = 0;
+                        module->headIndex = 0;
+                        module->stepsAvailable = 0;
+                        module->physicalFrame = 0;
+                        
+                        ProgramContext::Beacon * aBeacon = &programContext->beacons[0];
+                        
+                        Message handshake;
+                        handshake.type = MessageType_Init;
+                        handshake.init.clientType = ClientType_Beacon;
+                        handshake.init.beacon.frequency = aBeacon->frequency;
+                        strcpy_n(handshake.init.beacon.channel, aBeacon->channel, 3);
+                        strcpy_n(handshake.init.beacon.pan, aBeacon->pan, 5);
+                        
+                        NetSendSource message;
+                        message.buffer = (char*)&handshake;
+                        message.bufferLength = sizeof(Message);
+                        
+                        while(netSend(&module->socket, &message) != NetResultType_Ok){
+                            
+                        }
+                        //default attributes
+                        
+                        module->orientation = V3(0, 0, 0);
+                        module->position = V3(0, 0, 0);
+                        module->velocity = V3(0, 0, 0);
+                        module->acceleration = V3(0, 0, 0);
+                        
+                        module->accelerationBiasLower = {};
+                        module->accelerationBias = {};
+                        module->accelerationBiasUpper = {};
+                        
+                        module->gyroBiasLower = {};
+                        module->gyroBias = {};
+                        module->gyroBiasUpper = {};
+                    }else if(clientType == ClientType_Beacon){
+                        for(uint8 i = 0; i < ARRAYSIZE(programContext->beacons); i++){
+                            ProgramContext::Beacon * beacon = &programContext->beacons[i];
+                            
+                            strcpy_n(beacon->channel, wrap->init.beacon.channel, 3);
+                            strcpy_n(beacon->pan, wrap->init.beacon.pan, 5);
+                            beacon->frequency = wrap->init.beacon.frequency;
+                        }
+                        programContext->beaconsSocket = args->socket;
+                        programContext->beaconsThread = args->thread;
+                        
+                    }else{
+                        INV;
+                    }
                     
                 }break;
                 case MessageType_Data:{
-                    ASSERT(wrap->data.length % sizeof(MemsData) == 0 && sizeof(MemsData) == 12);
-                    
-                    result.bufferLength = wrap->data.length; 
-                    result.buffer = dataBuffer;
-                    result.resultLength = 0;
-                    
-                    uint16 accumulated = 0;
-                    
-                    while(accumulated != wrap->data.length){
+                    if(clientType == ClientType_Boeing){
+                        ASSERT(wrap->data.length % sizeof(MemsData) == 0 && sizeof(MemsData) == 12);
                         
-                        
-                        result.buffer = dataBuffer + accumulated;
-                        result.bufferLength = wrap->data.length - accumulated;
+                        result.bufferLength = wrap->data.length; 
+                        result.buffer = dataBuffer;
                         result.resultLength = 0;
                         
-                        resultCode = netRecv(&module->socket, &result);
-                        accumulated += result.resultLength;
+                        uint16 accumulated = 0;
                         
-                        if(resultCode != NetResultType_Ok){
-                            break;
+                        while(accumulated != wrap->data.length){
+                            
+                            
+                            result.buffer = dataBuffer + accumulated;
+                            result.bufferLength = wrap->data.length - accumulated;
+                            result.resultLength = 0;
+                            
+                            resultCode = netRecv(&module->socket, &result);
+                            accumulated += result.resultLength;
+                            
+                            if(resultCode != NetResultType_Ok){
+                                break;
+                            }
                         }
+                        
+                        ASSERT(accumulated == wrap->data.length);
+                        
+                        for(uint32 offset = 0; offset < wrap->data.length; offset += sizeof(MemsData)){
+                            
+                            MemsData * target = &module->data[module->headIndex];
+                            
+                            uint32 suboffset = 0;
+                            target->accX = ((uint16)(*(dataBuffer + offset + suboffset)) << 8) + *(dataBuffer + offset + suboffset + 1);
+                            suboffset += 2;
+                            target->accY = ((uint16)(*(dataBuffer + offset + suboffset)) << 8) + *(dataBuffer + offset + suboffset + 1);
+                            suboffset += 2;
+                            target->accZ = ((uint16)(*(dataBuffer + offset + suboffset)) << 8) + *(dataBuffer + offset + suboffset + 1);
+                            
+                            suboffset += 2;
+                            target->gyroX = ((uint16)(*(dataBuffer + offset + suboffset)) << 8) + *(dataBuffer + offset + suboffset + 1);
+                            suboffset += 2;
+                            target->gyroY = ((uint16)(*(dataBuffer + offset + suboffset)) << 8) + *(dataBuffer + offset + suboffset + 1);
+                            suboffset += 2;
+                            target->gyroZ = ((uint16)(*(dataBuffer + offset + suboffset)) << 8) + *(dataBuffer + offset + suboffset + 1);
+                            
+                            module->headIndex = (module->headIndex + 1) % ARRAYSIZE(module->data);
+                            FETCH_AND_ADD(&module->stepsAvailable, 1);
+                        }
+                        result.bufferLength = sizeof(Message);
+                        result.buffer = resultBuffer;
+                    }else if(clientType == ClientType_Beacon){
+                        
+                    }else{
+                        INV;
                     }
-                    
-                    
-                    
-                    
-                    ASSERT(accumulated == wrap->data.length);
-                    
-                    for(uint32 offset = 0; offset < wrap->data.length; offset += sizeof(MemsData)){
-                        
-                        MemsData * target = &module->data[module->headIndex];
-                        
-                        uint32 suboffset = 0;
-                        target->accX = ((uint16)(*(dataBuffer + offset + suboffset)) << 8) + *(dataBuffer + offset + suboffset + 1);
-                        suboffset += 2;
-                        target->accY = ((uint16)(*(dataBuffer + offset + suboffset)) << 8) + *(dataBuffer + offset + suboffset + 1);
-                        suboffset += 2;
-                        target->accZ = ((uint16)(*(dataBuffer + offset + suboffset)) << 8) + *(dataBuffer + offset + suboffset + 1);
-                        
-                        suboffset += 2;
-                        target->gyroX = ((uint16)(*(dataBuffer + offset + suboffset)) << 8) + *(dataBuffer + offset + suboffset + 1);
-                        suboffset += 2;
-                        target->gyroY = ((uint16)(*(dataBuffer + offset + suboffset)) << 8) + *(dataBuffer + offset + suboffset + 1);
-                        suboffset += 2;
-                        target->gyroZ = ((uint16)(*(dataBuffer + offset + suboffset)) << 8) + *(dataBuffer + offset + suboffset + 1);
-                        
-                        module->headIndex = (module->headIndex + 1) % ARRAYSIZE(module->data);
-                        FETCH_AND_ADD(&module->stepsAvailable, 1);
-                    }
-                    result.bufferLength = sizeof(Message);
-                    result.buffer = resultBuffer;
                 }break;
                 default:{
                     ASSERT(false);
@@ -247,22 +325,15 @@ void serve(void * whatever){
     ASSERT(!*programContext->quit);
     NetSocketSettings settings;
     settings.blocking = true;
-    NetSocket listener;
+    ClientArg * args = &PPUSH(ClientArg);
+    ASSERT(createMutex(&programContext->moduleMutex));
     while(!*programContext->quit && !programContext->close){
-        if(tcpAccept(&programContext->server, &listener, &settings)){
-            bool found = false;
-            for(uint32 i = 0; i < ARRAYSIZE(programContext->modules); i++){
-                if(!programContext->modules[i].run){
-                    found = true;
-                    programContext->modules[i].run = true;
-                    programContext->modules[i].socket = listener;
-                    ASSERT(createThread(&programContext->modules[i].thread, (void (*)(void *))client, &programContext->modules[i]));
-                }
-            }
-            ASSERT(found);
-            
+        if(tcpAccept(&programContext->server, &args->socket, &settings)){
+            ASSERT(createThread(&args->thread, (void (*)(void *))client, args));
+            args = &PPUSH(ClientArg);
         }
     }
+    destroyMutex(&programContext->moduleMutex);
 }
 
 
@@ -280,7 +351,7 @@ extern "C" __declspec(dllexport) bool init(Image * renderingTarget, bool * quit,
     programContext->close = false;
     programContext->quit = quit;
     programContext->renderingTarget = renderingTarget;
-    memset(&programContext->modules[0].name, 0, ARRAYSIZE(programContext->modules[0].name));
+    
     
     NetSocketSettings settings;
     settings.blocking = false;
@@ -544,7 +615,7 @@ extern "C" __declspec(dllexport) void render(){
         char buffer[122];
         uint16 fontSize = border;
         
-        sprintf(buffer, "module: %10s", activeModule->name); 
+        sprintf(buffer, "module: %1c", activeModule->name); 
         printToBitmap(programContext->renderingTarget, offset.x, offset.y, buffer, &programContext->font, fontSize);
         
         
@@ -1084,8 +1155,10 @@ extern "C" __declspec(dllexport) void close(){
         joinThread(&programContext->modules[i].thread);
         
     }
+    closeSocket(&programContext->beaconsSocket);
     closeSocket(&programContext->server);
     joinThread(&programContext->serverThread);
+    joinThread(&programContext->beaconsThread);
     
 }
 
