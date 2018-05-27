@@ -27,8 +27,11 @@
 #include "wiringPi.h"
 #include "wiringPiI2C.h"
 
+
+#include "linux_serial.cpp"
 #include "mpu6050.cpp"
 #include "linux_net.cpp"
+
 
 #include "pi_domain.cpp"
 
@@ -45,6 +48,7 @@ bool initPlatform()
         if(!initNet()){
             return false;
         }
+        initTime();
         
         
         domainState = (DomainState *) mem.persistent;

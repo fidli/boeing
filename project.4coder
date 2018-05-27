@@ -1,0 +1,6 @@
+extensions="";
+
+fkey_command_win[1] = {"build_remote_pi.bat", "*compilation*", true};
+fkey_command_win[2] = {"build_x64_beacons.bat", "*compilation*", true};
+fkey_command_win[3] = {"build_x64_server_code.bat", "*compilation*", true};
+fkey_command_win[4] = {"build_x64_server_platform.bat", "*compilation*", true};

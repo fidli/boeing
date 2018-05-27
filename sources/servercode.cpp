@@ -203,8 +203,8 @@ void client(const ClientArg * args){
                         handshake.type = MessageType_Init;
                         handshake.init.clientType = ClientType_Beacon;
                         handshake.init.beacon.frequency = aBeacon->frequency;
-                        strcpy_n(handshake.init.beacon.channel, aBeacon->channel, 3);
-                        strcpy_n(handshake.init.beacon.pan, aBeacon->pan, 5);
+                        strncpy(handshake.init.beacon.channel, aBeacon->channel, 3);
+                        strncpy(handshake.init.beacon.pan, aBeacon->pan, 5);
                         
                         NetSendSource message;
                         message.buffer = (char*)&handshake;
@@ -231,8 +231,8 @@ void client(const ClientArg * args){
                         for(uint8 i = 0; i < ARRAYSIZE(programContext->beacons); i++){
                             ProgramContext::Beacon * beacon = &programContext->beacons[i];
                             
-                            strcpy_n(beacon->channel, wrap->init.beacon.channel, 3);
-                            strcpy_n(beacon->pan, wrap->init.beacon.pan, 5);
+                            strncpy(beacon->channel, wrap->init.beacon.channel, 3);
+                            strncpy(beacon->pan, wrap->init.beacon.pan, 5);
                             beacon->frequency = wrap->init.beacon.frequency;
                         }
                         programContext->beaconsSocket = args->socket;

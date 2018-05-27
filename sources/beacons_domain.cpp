@@ -72,7 +72,7 @@ extern "C" __declspec(dllexport) bool initDomain(void * platformMemory){
     state = (State *) platformMemory;
     ASSERT(sizeof(State) <= PERSISTENT_MEM);
     
-    char coms[4][6] = {"COM3", "COM4", "COM5", "COM6"};
+    char coms[4][6] = {"COM3", "COM5", "COM7", "COM8"};
     char coordinator[] = "400A3EF2";
     
     char path[10];
@@ -97,7 +97,8 @@ extern "C" __declspec(dllexport) bool initDomain(void * platformMemory){
                         LOG("failed to read module values");
                         closeHandle(beacon);
                         return false;
-                    }if(!strcmp_n(coordinator, beacon->sidLower, 8)){
+                    }
+                    if(!strncmp(coordinator, beacon->sidLower, 8)){
                         state->coordinator = beacon;
                     }
                     LOG("handle opened and module inited");
@@ -113,47 +114,7 @@ extern "C" __declspec(dllexport) bool initDomain(void * platformMemory){
         while(!xbs2_initNetwork(state->coordinator));
         
         char channelMask[5];
-        /**
-        bit flag (channel)
-        0 (0x0B) 4 (0x0F) 8 (0x13) 12 (0x17)
-            1 (0x0C) 5 (0x10) 9 (0x14) 13 (0x18)
-            2 (0x0D) 6 (0x11) 10 (0x15) 14 (0x19)
-            3 (0x0E) 7 (0x12) 11 (0x16) 15 (0x1A)
-            
-            */
-        if(!strcmp_n(state->coordinator->channel, "B", 2)){
-            strcpy(channelMask, "0001");
-        }else if(!strcmp_n(state->coordinator->channel, "C", 2)){
-            strcpy(channelMask, "0002");
-        }else if(!strcmp_n(state->coordinator->channel, "D", 2)){
-            strcpy(channelMask, "0004");
-        }else if(!strcmp_n(state->coordinator->channel, "E", 2)){
-            strcpy(channelMask, "0008");
-        }else if(!strcmp_n(state->coordinator->channel, "F", 2)){
-            strcpy(channelMask, "0010");
-        }else if(!strcmp_n(state->coordinator->channel, "10", 2)){
-            strcpy(channelMask, "0020");
-        }else if(!strcmp_n(state->coordinator->channel, "11", 2)){
-            strcpy(channelMask, "0040");
-        }else if(!strcmp_n(state->coordinator->channel, "12", 2)){
-            strcpy(channelMask, "0080");
-        }else if(!strcmp_n(state->coordinator->channel, "13", 2)){
-            strcpy(channelMask, "0100");
-        }else if(!strcmp_n(state->coordinator->channel, "14", 2)){
-            strcpy(channelMask, "0200");
-        }else if(!strcmp_n(state->coordinator->channel, "15", 2)){
-            strcpy(channelMask, "0400");
-        }else if(!strcmp_n(state->coordinator->channel, "16", 2)){
-            strcpy(channelMask, "0800");
-        }else if(!strcmp_n(state->coordinator->channel, "17", 2)){
-            strcpy(channelMask, "1000");
-        }else if(!strcmp_n(state->coordinator->channel, "18", 2)){
-            strcpy(channelMask, "2000");
-        }else if(!strcmp_n(state->coordinator->channel, "19", 2)){
-            strcpy(channelMask, "4000");
-        }else if(!strcmp_n(state->coordinator->channel, "1A", 2)){
-            strcpy(channelMask, "8000");
-        }
+        ASSERT(xbs2_getChannelMask(state->coordinator->channel, channelMask));
         
         LOG("found channel");
         LOG(state->coordinator->channel);
@@ -166,7 +127,7 @@ extern "C" __declspec(dllexport) bool initDomain(void * platformMemory){
             if(beacon != state->coordinator){
                 LOG("joining network with");
                 LOG(beacon->sidLower);
-                while(!xbs2_initNetwork(beacon, channelMask) || (strcmp_n(state->coordinator->pan, beacon->pan, 5) != 0 || strcmp_n(state->coordinator->channel, beacon->channel, 3) != 0));
+                while(!xbs2_initNetwork(beacon, channelMask) || (strncmp(state->coordinator->pan, beacon->pan, 5) != 0 || strncmp(state->coordinator->channel, beacon->channel, 3) != 0));
                 beacon->frequency = state->coordinator->frequency;
                 LOG("success");
             }
@@ -197,8 +158,8 @@ extern "C" __declspec(dllexport) bool initDomain(void * platformMemory){
         handshake.type = MessageType_Init;
         handshake.init.clientType = ClientType_Beacon;
         handshake.init.beacon.frequency = state->coordinator->frequency;
-        strcpy_n(handshake.init.beacon.channel, state->coordinator->channel, 3);
-        strcpy_n(handshake.init.beacon.pan, state->coordinator->pan, 5);
+        strncpy(handshake.init.beacon.channel, state->coordinator->channel, 3);
+        strncpy(handshake.init.beacon.pan, state->coordinator->pan, 5);
         
         NetSendSource message;
         message.buffer = (char*)&handshake;

@@ -8,6 +8,7 @@
 
 #include "common.h"
 #include "util_mem.h"
+#include "util_math.cpp"
 #include "util_filesystem.h"
 #include "util_net.h"
 #include "util_thread.h"
@@ -105,30 +106,48 @@ void connectToServer(volatile bool * go){
     NetSendSource namaste;
     Message namasteMessage;
     namasteMessage.type = MessageType_Init;
+    namasteMessage.init.clientType = ClientType_Boeing;
     namaste.bufferLength = sizeof(namasteMessage.reserved) + sizeof(namasteMessage.init);
-    namasteMessage.init.name = '1';
-    namasteMessage.init.settings = domainState->memsHandle.settings;
+    namasteMessage.init.boeing.name = '1';
+    namasteMessage.init.boeing.settings = domainState->memsHandle.settings;
     namaste.buffer = (char*) &namasteMessage;
     while(true){
         NetResultType subRes = netSend(&domainState->localSocket, &namaste);
         if(subRes == NetResultType_Ok || subRes == NetResultType_Closed){
             
+            printf("init message sent\n");
+            
+            printf("getting xbs2 settings\n");
             //accept christ blood and body in form of module settings
             Message xbs2settings;
             NetRecvResult result;
             result.bufferLength = sizeof(Message);
             result.buffer = (char *)&xbs2settings;
             
-            NetResultType resultCode = netRecv(&args->socket, &result);
+            NetResultType resultCode = netRecv(&domainState->localSocket, &result);
             while(resultCode != NetResultType_Ok);
-            programContext->xbFreq = xbs2settings.info.beacon.frequency;
-            strcpy_n(programContext->channel, xbs2settings.info.beacon.channel, 3);
-            strcpy_n(programContext->pan, xbs2settings.info.beacon.pan, 5);
+            domainState->xbFreq = xbs2settings.init.beacon.frequency;
+            strncpy(domainState->channel, xbs2settings.init.beacon.channel, 3);
+            strncpy(domainState->pan, xbs2settings.init.beacon.pan, 5);
+            
+            //set the xbs
+            printf("got the settings, channel: %3s, pan: %5s\n", domainState->channel, domainState->pan);
+            printf("connecting to the xbs network\n");
+            
+            char channelMask[5];
+            if(!xbs2_getChannelMask(domainState->channel, channelMask)){
+                printf("ERROR, failed to determino channel mask\n");
+                *go = false;
+                break;
+            }
+            while(!xbs2_initNetwork(&domainState->xb, channelMask));
             
             
             
-            printf("init message sent\n");
+            printf("success, channel %s, pan %s\n", domainState->xb.channel, domainState->xb.pan);
             break;
+            
+            
         }
     }
 #endif
@@ -167,8 +186,38 @@ void domainRun(){
     domainState->memsHandle.settings = {GyroPrecision_500, AccPrecision_4, 250};
     domainState->haltPolling =  false;
     domainState->pollHalted = false;
+    printf("opening handle\n");
+    if(!openHandle("/dev/ttyAMA0", &domainState->xb)){
+        printf("failed to open serial handle\n");
+        go &= false;
+        return;
+    }
+    printf("handle opened\n");
     
+    printf("detecting baud rate\n");
+    if(!xbs2_detectAndSetStandardBaudRate(&domainState->xb)){
+        printf("failed to detect baud rate on xb\n");
+        closeHandle(&domainState->xb);
+        go &= false;
+        return;
+    }
+    printf("baud rate detected: %d\n", domainState->xb.baudrate);
+    printf("initing module\n");
+    if(!xbs2_initModule(&domainState->xb)){
+        printf("falied to init xb module\n");
+        closeHandle(&domainState->xb);
+        go &= false;
+        return;
+    }
+    printf("module inited, reading values\n");
     
+    if (!xbs2_readValues(&domainState->xb)){
+        printf("failed to read module values");
+        closeHandle(&domainState->xb);
+        return;
+    }
+    
+    printf("values read, sid %9s\n", domainState->xb.sidLower);
     
 #if IMMEDIATE
 #else
