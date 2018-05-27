@@ -39,9 +39,9 @@ extern "C"{
 #include "windows_types.h"
 #include "common.h"
 
-#define PERSISTENT_MEM MEGABYTE(1)
-#define TEMP_MEM MEGABYTE(100)
-#define STACK_MEM MEGABYTE(100)
+#include "servercode_memory.h"
+
+#include "servercode_common.h"
 
 #define sleep(n) Sleep((n)*1000000);
 
@@ -52,7 +52,6 @@ extern "C"{
 #include "util_net.h"
 #include "util_thread.h"
 #include "util_font.cpp"
-#include "util_rng.cpp"
 #include "util_math.cpp"
 #include "util_graphics.cpp"
 #include "util_conv.cpp"
@@ -82,11 +81,9 @@ struct MemsData{
 
 
 
-struct ProgramContext{
-    NetSocket server;
-    Thread serverThread;
+struct ProgramContext : Common{
+    bool inited;
     BitmapFont font;
-    Mutex moduleMutex;
     struct Module{
         
         char name;
@@ -111,14 +108,10 @@ struct ProgramContext{
         v3 accelerationBias;
         v3 accelerationBiasUpper;
         
-        
-        NetSocket socket;
-        Thread thread;
-        
         uint32 physicalFrame;
-        
+        char * dataBuffer;
         bool run;
-    } modules[1];
+    } modules[2];
     
     struct Beacon{
         uint16 frequency;
@@ -127,275 +120,241 @@ struct ProgramContext{
         v3 position;
     } beacons[4];
     
-    NetSocket beaconsSocket;
-    Thread beaconsThread;
+    bool beaconsRun;
     
-    bool close;
-    bool * quit;
     Image * renderingTarget;
     float32 accumulator;
     
 };
 
 ProgramContext * programContext;
+bool inited = false;
 
-struct ClientArg{
-    NetSocket socket;
-    Thread thread;
-};
-
-void client(const ClientArg * args){
+extern "C" __declspec(dllexport) void boeingDomainRoutine(int index){
+    if(!inited || !programContext->inited) return;
+    NetRecvResult result;
     
+    
+    ProgramContext::Module * module = &programContext->modules[index];
+    Message wrap;
+    
+    if(programContext->keepRunning && module->run){
+        result.bufferLength = sizeof(Message);
+        result.buffer = (char *) &wrap;
+        NetResultType resultCode = netRecv(&programContext->boeingSocket[index], &result);
+        if(resultCode == NetResultType_Ok){
+            
+            ASSERT(wrap.data.length % sizeof(MemsData) == 0 && sizeof(MemsData) == 12);
+            
+            result.bufferLength = wrap.data.length; 
+            result.buffer = module->dataBuffer;
+            result.resultLength = 0;
+            uint16 accumulated = 0;
+            while(accumulated != wrap.data.length){
+                
+                
+                result.buffer = module->dataBuffer + accumulated;
+                result.bufferLength = wrap.data.length - accumulated;
+                result.resultLength = 0;
+                
+                resultCode = netRecv(&programContext->boeingSocket[index], &result);
+                accumulated += result.resultLength;
+                
+                if(resultCode != NetResultType_Ok){
+                    break;
+                }
+            }
+            
+            ASSERT(accumulated == wrap.data.length);
+            
+            for(uint32 offset = 0; offset < wrap.data.length; offset += sizeof(MemsData)){
+                
+                MemsData * target = &module->data[module->headIndex];
+                
+                uint32 suboffset = 0;
+                target->accX = ((uint16)(*(module->dataBuffer + offset + suboffset)) << 8) + *(module->dataBuffer + offset + suboffset + 1);
+                suboffset += 2;
+                target->accY = ((uint16)(*(module->dataBuffer + offset + suboffset)) << 8) + *(module->dataBuffer + offset + suboffset + 1);
+                suboffset += 2;
+                target->accZ = ((uint16)(*(module->dataBuffer + offset + suboffset)) << 8) + *(module->dataBuffer + offset + suboffset + 1);
+                
+                suboffset += 2;
+                target->gyroX = ((uint16)(*(module->dataBuffer + offset + suboffset)) << 8) + *(module->dataBuffer + offset + suboffset + 1);
+                suboffset += 2;
+                target->gyroY = ((uint16)(*(module->dataBuffer + offset + suboffset)) << 8) + *(module->dataBuffer + offset + suboffset + 1);
+                suboffset += 2;
+                target->gyroZ = ((uint16)(*(module->dataBuffer + offset + suboffset)) << 8) + *(module->dataBuffer + offset + suboffset + 1);
+                
+                module->headIndex = (module->headIndex + 1) % ARRAYSIZE(module->data);
+                FETCH_AND_ADD(&module->stepsAvailable, 1);
+            }
+        }else{
+            closeSocket(&programContext->boeingSocket[index]);
+            module->run = false;
+        }
+    }
+}
+
+
+extern "C" __declspec(dllexport) void beaconsDomainRoutine(){
+    if(!inited || !programContext->inited) return;
     NetRecvResult result;
     result.bufferLength = sizeof(Message);
-    PUSHI;
-    char * resultBuffer = result.buffer = &PUSHA(char, result.bufferLength);
+    Message message;
+    result.buffer = (char *) &message;
+    if(programContext->beaconsRun){
+        NetResultType resultCode = netRecv(&programContext->beaconsSocket, &result);
+        if(resultCode == NetResultType_Ok){
+            ASSERT(message.type == MessageType_Data);
+            //todo beacons processing
+            
+        }else{
+            closeSocket(&programContext->beaconsSocket);
+            programContext->beaconsRun = false;
+        }
+    }
+}
+
+void resetModule(int index){
+    ProgramContext::Module * module = &programContext->modules[index];
+    module->tailIndex = 0;
+    module->headIndex = 0;
+    module->stepsAvailable = 0;
+    module->physicalFrame = 0;
     
-    char * dataBuffer = &PUSHA(char, 4092);
+    module->orientation = V3(0, 0, 0);
+    module->position = V3(0, 0, 0);
+    module->velocity = V3(0, 0, 0);
+    module->acceleration = V3(0, 0, 0);
     
-    ClientType clientType;
+    module->accelerationBiasLower = {};
+    module->accelerationBias = {};
+    module->accelerationBiasUpper = {};
     
-    ProgramContext::Module * module = NULL;
+    module->gyroBiasLower = {};
+    module->gyroBias = {};
+    module->gyroBiasUpper = {};
     
-    while(!*programContext->quit && (module == NULL || module->run)  && !programContext->close){
+}
+
+
+extern "C" __declspec(dllexport) void serverDomainRoutine(){
+    if(!inited || !programContext->inited) return;
+    NetSocketSettings settings;
+    settings.blocking = true;
+    NetSocket socket;
+    if(tcpAccept(&programContext->serverSocket, &socket, &settings)){
+        NetRecvResult result;
         result.bufferLength = sizeof(Message);
-        NetResultType resultCode = netRecv(&args->socket, &result);
+        result.buffer = &PUSHA(char, result.bufferLength);
+        
+        //is this boeing or beacons client ?
+        NetResultType resultCode = netRecv(&socket, &result);
         if(resultCode == NetResultType_Ok){
             
             Message * wrap = (Message *) result.buffer;
-            switch(wrap->type){
-                case MessageType_Init:{
-                    
-                    clientType = wrap->init.clientType;
-                    
-                    if(clientType == ClientType_Boeing){
-                        
-                        lock(&programContext->moduleMutex);
-                        
-                        bool found = false;
-                        uint32 i = 0;
-                        for(; i < ARRAYSIZE(programContext->modules); i++){
-                            if(!programContext->modules[i].run){
-                                found = true;
-                                break;
-                            }
-                        }
-                        unlock(&programContext->moduleMutex);
-                        ASSERT(found);
-                        
-                        
-                        module = &programContext->modules[i];
-                        module->run = true;
-                        module->socket = args->socket;
-                        module->thread = args->thread;
-                        
-                        module->name = wrap->init.boeing.name;
-                        module->settings = wrap->init.boeing.settings;
-                        ASSERT(wrap->init.boeing.settings.sampleRate == 250);
-                        module->tailIndex = 0;
-                        module->headIndex = 0;
-                        module->stepsAvailable = 0;
-                        module->physicalFrame = 0;
-                        
-                        ProgramContext::Beacon * aBeacon = &programContext->beacons[0];
-                        
-                        Message handshake;
-                        handshake.type = MessageType_Init;
-                        handshake.init.clientType = ClientType_Beacon;
-                        handshake.init.beacon.frequency = aBeacon->frequency;
-                        strncpy(handshake.init.beacon.channel, aBeacon->channel, 3);
-                        strncpy(handshake.init.beacon.pan, aBeacon->pan, 5);
-                        
-                        NetSendSource message;
-                        message.buffer = (char*)&handshake;
-                        message.bufferLength = sizeof(Message);
-                        
-                        while(netSend(&module->socket, &message) != NetResultType_Ok){
-                            
-                        }
-                        //default attributes
-                        
-                        module->orientation = V3(0, 0, 0);
-                        module->position = V3(0, 0, 0);
-                        module->velocity = V3(0, 0, 0);
-                        module->acceleration = V3(0, 0, 0);
-                        
-                        module->accelerationBiasLower = {};
-                        module->accelerationBias = {};
-                        module->accelerationBiasUpper = {};
-                        
-                        module->gyroBiasLower = {};
-                        module->gyroBias = {};
-                        module->gyroBiasUpper = {};
-                    }else if(clientType == ClientType_Beacon){
-                        for(uint8 i = 0; i < ARRAYSIZE(programContext->beacons); i++){
-                            ProgramContext::Beacon * beacon = &programContext->beacons[i];
-                            
-                            strncpy(beacon->channel, wrap->init.beacon.channel, 3);
-                            strncpy(beacon->pan, wrap->init.beacon.pan, 5);
-                            beacon->frequency = wrap->init.beacon.frequency;
-                        }
-                        programContext->beaconsSocket = args->socket;
-                        programContext->beaconsThread = args->thread;
-                        
-                    }else{
-                        INV;
+            ASSERT(wrap->type == MessageType_Init);
+            ClientType clientType = wrap->init.clientType;
+            if(clientType == ClientType_Boeing){
+                ASSERT(programContext->beaconsRun);
+                bool found = false;
+                uint32 i = 0;
+                for(; i < ARRAYSIZE(programContext->modules); i++){
+                    if(!programContext->modules[i].run){
+                        found = true;
+                        break;
                     }
+                }
+                ASSERT(found);
+                
+                
+                ProgramContext::Module * module = &programContext->modules[i];
+                
+                programContext->boeingSocket[i] = socket;
+                
+                
+                module->name = wrap->init.boeing.name;
+                module->settings = wrap->init.boeing.settings;
+                ASSERT(wrap->init.boeing.settings.sampleRate == 250);
+                
+                ProgramContext::Beacon * aBeacon = &programContext->beacons[0];
+                
+                Message handshake;
+                handshake.type = MessageType_Init;
+                handshake.init.clientType = ClientType_Beacon;
+                handshake.init.beacon.frequency = aBeacon->frequency;
+                strncpy(handshake.init.beacon.channel, aBeacon->channel, 3);
+                strncpy(handshake.init.beacon.pan, aBeacon->pan, 5);
+                
+                NetSendSource message;
+                message.buffer = (char*)&handshake;
+                message.bufferLength = sizeof(Message);
+                
+                while(netSend(&programContext->boeingSocket[i], &message) != NetResultType_Ok){
                     
-                }break;
-                case MessageType_Data:{
-                    if(clientType == ClientType_Boeing){
-                        ASSERT(wrap->data.length % sizeof(MemsData) == 0 && sizeof(MemsData) == 12);
-                        
-                        result.bufferLength = wrap->data.length; 
-                        result.buffer = dataBuffer;
-                        result.resultLength = 0;
-                        
-                        uint16 accumulated = 0;
-                        
-                        while(accumulated != wrap->data.length){
-                            
-                            
-                            result.buffer = dataBuffer + accumulated;
-                            result.bufferLength = wrap->data.length - accumulated;
-                            result.resultLength = 0;
-                            
-                            resultCode = netRecv(&module->socket, &result);
-                            accumulated += result.resultLength;
-                            
-                            if(resultCode != NetResultType_Ok){
-                                break;
-                            }
-                        }
-                        
-                        ASSERT(accumulated == wrap->data.length);
-                        
-                        for(uint32 offset = 0; offset < wrap->data.length; offset += sizeof(MemsData)){
-                            
-                            MemsData * target = &module->data[module->headIndex];
-                            
-                            uint32 suboffset = 0;
-                            target->accX = ((uint16)(*(dataBuffer + offset + suboffset)) << 8) + *(dataBuffer + offset + suboffset + 1);
-                            suboffset += 2;
-                            target->accY = ((uint16)(*(dataBuffer + offset + suboffset)) << 8) + *(dataBuffer + offset + suboffset + 1);
-                            suboffset += 2;
-                            target->accZ = ((uint16)(*(dataBuffer + offset + suboffset)) << 8) + *(dataBuffer + offset + suboffset + 1);
-                            
-                            suboffset += 2;
-                            target->gyroX = ((uint16)(*(dataBuffer + offset + suboffset)) << 8) + *(dataBuffer + offset + suboffset + 1);
-                            suboffset += 2;
-                            target->gyroY = ((uint16)(*(dataBuffer + offset + suboffset)) << 8) + *(dataBuffer + offset + suboffset + 1);
-                            suboffset += 2;
-                            target->gyroZ = ((uint16)(*(dataBuffer + offset + suboffset)) << 8) + *(dataBuffer + offset + suboffset + 1);
-                            
-                            module->headIndex = (module->headIndex + 1) % ARRAYSIZE(module->data);
-                            FETCH_AND_ADD(&module->stepsAvailable, 1);
-                        }
-                        result.bufferLength = sizeof(Message);
-                        result.buffer = resultBuffer;
-                    }else if(clientType == ClientType_Beacon){
-                        
-                    }else{
-                        INV;
-                    }
-                }break;
-                default:{
-                    ASSERT(false);
-                }break;
+                }
+                //default attributes
+                resetModule(i);
+                module->run = true;
                 
-                
-                
-                
-                
-                
+            }else if(clientType == ClientType_Beacon){
+                for(uint8 i = 0; i < ARRAYSIZE(programContext->beacons); i++){
+                    ProgramContext::Beacon * beacon = &programContext->beacons[i];
+                    
+                    strncpy(beacon->channel, wrap->init.beacon.channel, 3);
+                    strncpy(beacon->pan, wrap->init.beacon.pan, 5);
+                    beacon->frequency = wrap->init.beacon.frequency;
+                }
+                programContext->beaconsSocket = socket;
+                programContext->beaconsRun = true;
             }
-        }
-        if(resultCode == NetResultType_Timeout || resultCode == NetResultType_Closed){
-            
-            break;
+        }else{
+            closeSocket(&socket);
         }
     }
-    closeSocket(&module->socket);
-    module->run = false;
-    POPI;
+    
 }
 
-void serve(void * whatever){
-    *programContext->quit = !tcpListen(&programContext->server, 10);
-    ASSERT(!*programContext->quit);
-    NetSocketSettings settings;
-    settings.blocking = true;
-    ClientArg * args = &PPUSH(ClientArg);
-    ASSERT(createMutex(&programContext->moduleMutex));
-    while(!*programContext->quit && !programContext->close){
-        if(tcpAccept(&programContext->server, &args->socket, &settings)){
-            ASSERT(createThread(&args->thread, (void (*)(void *))client, args));
-            args = &PPUSH(ClientArg);
-        }
+
+extern "C" __declspec(dllexport) void initDomainRoutine(void * memoryStart, Image * renderingTarget){
+    
+    initMemory(memoryStart);
+    
+    programContext = (ProgramContext *)memoryStart;
+    
+    initTime();
+    
+    
+    if(!programContext->inited){
+        programContext->renderingTarget = renderingTarget;
+        bool result = true;
+        FileContents fontFile;
+        result &= readFile("data\\font.bmp", &fontFile);
+        Image source;
+        result &= decodeBMP(&fontFile, &source);
+        result &= flipY(&source);
+        result &= initBitmapFont(&programContext->font, &source, source.info.width / 16);
+        
+        result &= tcpListen(&programContext->serverSocket, 10);
+        
+        
+        programContext->modules[0].dataBuffer = &PUSHA(char, 4092);
+        programContext->modules[1].dataBuffer = &PUSHA(char, 4092);
+        
+        programContext->inited = result;
+        
+        
+        ASSERT(programContext->inited);
     }
-    destroyMutex(&programContext->moduleMutex);
+    inited = true;
 }
 
 
-extern "C" __declspec(dllexport) bool init(Image * renderingTarget, bool * quit, void * mem, bool memInit){
-    initMemory(mem);
-    
-    bool result = true;
-    
-    programContext = (ProgramContext *)mem;
-    
-    if(!memInit){
-        *programContext = {};
-    }
-    
-    programContext->close = false;
-    programContext->quit = quit;
-    programContext->renderingTarget = renderingTarget;
-    
-    
-    NetSocketSettings settings;
-    settings.blocking = false;
-    
-    result &= initSocket(&programContext->server, "10.0.0.10", "25555", &settings);
-    if(result){
-        result &= createThread(&programContext->serverThread, serve, NULL);
-    }
-    
-    
-    
-    initRng();
-    
-    
-    
-    FileContents fontFile;
-    result &= readFile("data\\font.bmp", &fontFile);
-    Image source;
-    result &= decodeBMP(&fontFile, &source);
-    result &= flipY(&source);
-    result &= initBitmapFont(&programContext->font, &source, source.info.width / 16); 
-    
-    
-    return result;
-}
 
 
-extern "C" __declspec(dllexport) void mockMemsData(float32 * accumulator){
-    /*
-    MemsData * target = &programContext->modules[0].data[programContext->modules[0].headIndex];
-    programContext->modules[0].headIndex = (programContext->modules[0].headIndex + 1) % ARRAYSIZE(programContext->modules[0].data);
-    
-    target->accX = randlcg();
-    target->accY = randlcg();
-    target->accZ = randlcg();
-    
-    target->gyroX = randlcg();
-    target->gyroY = randlcg();
-    target->gyroZ = randlcg();
-    */
-}
-
-
-extern "C" __declspec(dllexport) void process(float32 * accumulator){
+extern "C" __declspec(dllexport) void processDomainRoutine(){
+    if(!inited || !programContext->inited) return;
+    float32 start = getProcessCurrentTime();
     
     float32 dt = 0;
     const float32 g = mpu6050_g;
@@ -415,7 +374,7 @@ extern "C" __declspec(dllexport) void process(float32 * accumulator){
         }
     }
     
-    stepsAmount = MIN(stepsAmount, (uint16)(*accumulator / dt));
+    stepsAmount = MIN(stepsAmount, (uint16)(programContext->accumulator / dt));
     
     const uint32 calibrationFrame = 100;
     const uint32 warmedUpFrame = 30;
@@ -526,16 +485,16 @@ extern "C" __declspec(dllexport) void process(float32 * accumulator){
     
     
     if(dt == 0){
-        *accumulator = 0;
+        programContext->accumulator = 0;
     }else{
-        *accumulator -= dt * stepsAmount;
-        programContext->accumulator = *accumulator;
+        programContext->accumulator -= dt*stepsAmount;
     }
     
+    programContext->accumulator += getProcessCurrentTime() - start;
 }
 
-extern "C" __declspec(dllexport) void render(){
-    
+extern "C" __declspec(dllexport) void renderDomainRoutine(){
+    if(!inited || !programContext->inited) return;
     for(uint32 h = 0; h < programContext->renderingTarget->info.height; h++){
         uint32 pitch = h*programContext->renderingTarget->info.width;
         
@@ -1146,21 +1105,6 @@ extern "C" __declspec(dllexport) void render(){
     
 }
 
-
-extern "C" __declspec(dllexport) void close(){
-    programContext->close = true;
-    
-    for(uint32 i = 0; i < ARRAYSIZE(programContext->modules); i++){
-        programContext->modules[i].run = false;
-        joinThread(&programContext->modules[i].thread);
-        
-    }
-    closeSocket(&programContext->beaconsSocket);
-    closeSocket(&programContext->server);
-    joinThread(&programContext->serverThread);
-    joinThread(&programContext->beaconsThread);
-    
-}
 
 
 BOOL WINAPI DllMain(HINSTANCE hinstDLL,DWORD fdwReason,LPVOID lpReserved)

@@ -62,6 +62,11 @@ extern "C"{
 
 #include "windows_net.cpp"
 
+#include "windows_dll.cpp"
+
+#include "windows_thread.cpp"
+
+
 static inline DWORD jettisonAllPrivileges() {
     DWORD result = ERROR_SUCCESS;
     HANDLE processToken  = NULL;
@@ -100,34 +105,44 @@ struct DrawContext{
 };
 
 
+#include "servercode_common.h"
 
 struct Context{
     HINSTANCE hInstance;
     HWND window;
-    
+    DrawContext renderer;
+    Image renderingTarget;
+    Thread serverThread;
+    Thread beaconsThread;
+    Thread boeingThread[2];
+    Thread processThread;
+    char ip[16];
+    char port[6];
+    bool freeze;
+    bool serverRunning;
+    bool processRunning;
+    bool beaconsRunning;
+    bool boeingRunning[2];
+    Common common;
 };
 
-bool quit;
 
-Context context;
-DrawContext renderer;
-Image renderingTarget;
-
-
-#include "windows_thread.cpp"
+Context * context;
 
 
 
+
+#include "util_config.cpp"
 
 void resizeCanvas(HWND window, LONG width, LONG height){
-    if(renderer.DIBSection){
-        DeleteObject(renderer.DIBSection);
+    if(context->renderer.DIBSection){
+        DeleteObject(context->renderer.DIBSection);
     }else{
         
-        renderer.backbufferDC = CreateCompatibleDC(NULL);
+        context->renderer.backbufferDC = CreateCompatibleDC(NULL);
     }
     
-    renderer.drawinfo = {{
+    context->renderer.drawinfo = {{
             sizeof(BITMAPINFOHEADER),
             width,
             -height,
@@ -141,22 +156,22 @@ void resizeCanvas(HWND window, LONG width, LONG height){
             0},
         0
     };
-    renderer.DIBSection = CreateDIBSection(renderer.backbufferDC, &renderer.drawinfo, DIB_RGB_COLORS, (void**) &renderer.drawbuffer, NULL, NULL);
+    context->renderer.DIBSection = CreateDIBSection(context->renderer.backbufferDC, &context->renderer.drawinfo, DIB_RGB_COLORS, (void**) &context->renderer.drawbuffer, NULL, NULL);
     
-    renderer.height = height;
-    renderer.width = width;
+    context->renderer.height = height;
+    context->renderer.width = width;
     
 }
 
 void updateCanvas(HDC dc, int x, int y, int width, int height){
-    StretchDIBits(dc, x, y, width, height, 0, 0, width, height, renderer.drawbuffer, &renderer.drawinfo, DIB_RGB_COLORS, SRCCOPY);
+    StretchDIBits(dc, x, y, width, height, 0, 0, width, height, context->renderer.drawbuffer, &context->renderer.drawinfo, DIB_RGB_COLORS, SRCCOPY);
 }
 
 LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam){
     switch(message)
     {
         case WM_SIZE:{
-            resizeCanvas(context.window, (WORD)lParam, (WORD) (lParam >> sizeof(WORD) * 8));
+            resizeCanvas(context->window, (WORD)lParam, (WORD) (lParam >> sizeof(WORD) * 8));
         }
         break;
         case WM_PAINT:{
@@ -169,13 +184,13 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
             
             updateCanvas(dc, x, y, width, height);
             
-            EndPaint(context.window, &paint);
+            EndPaint(context->window, &paint);
         }
         break;
         case WM_CLOSE:
         case WM_DESTROY:
         {
-            quit = true;
+            context->common.keepRunning = false;
             return 0;
         } break;
     }
@@ -183,12 +198,77 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
     return DefWindowProc (window, message, wParam, lParam);
 }
 
+DEFINEDLLFUNC(void, beaconsDomainRoutine, void);
+DEFINEDLLFUNC(void, serverDomainRoutine,  void);
+DEFINEDLLFUNC(void, boeingDomainRoutine,  int);
+DEFINEDLLFUNC(void, initDomainRoutine, void *, Image *);
+DEFINEDLLFUNC(void, processDomainRoutine, void);
+DEFINEDLLFUNC(void, renderDomainRoutine, void);
 
-void (*render)(void);
-void (*process)(float32 *);
-bool (*init)(Image *, bool *, void *, bool);
-void (*mockMemsData)(float32 *);
-void (*close)(void);
+
+static bool loadPlatformConfig(const char * line){
+    if(!strncmp("ip", line, 2)){
+        return sscanf(line, "ip %16[^ ] %6[^\r\n]", context->ip, context->port) == 2;
+    }
+    return true;
+}
+
+
+static void beaconsPlatform(void *){
+    while(context->common.keepRunning){
+        if(!context->freeze && beaconsDomainRoutine != NULL){
+            context->beaconsRunning = true;
+            beaconsDomainRoutine();
+            context->beaconsRunning = false;
+        }
+    }
+}
+
+
+
+static void serverPlatform(void *){
+    while(context->common.keepRunning){
+        if(!context->freeze && serverDomainRoutine != NULL){
+            context->serverRunning = true;
+            serverDomainRoutine();
+            context->serverRunning = false;
+        }
+    }
+}
+
+static void boeingPlatform(int index){
+    while(context->common.keepRunning){
+        if(!context->freeze && boeingDomainRoutine != NULL){
+            context->boeingRunning[index] = true;
+            boeingDomainRoutine(index);
+            context->boeingRunning[index] = false;
+        }
+    }
+}
+
+static void processPlatform(void *){
+    while(context->common.keepRunning){
+        if(!context->freeze && processDomainRoutine != NULL){
+            context->processRunning = true;
+            processDomainRoutine();
+            context->processRunning = false;
+        }
+    }
+}
+
+
+void customWait(){
+    context->freeze = true;
+    
+    while(context->processRunning);
+    while(context->boeingRunning[0]);
+    while(context->boeingRunning[1]);
+    while(context->serverRunning);
+    while(context->beaconsRunning);
+    
+    
+    
+}
 
 static inline int main(LPWSTR * argvW, int argc) {
     
@@ -200,6 +280,10 @@ static inline int main(LPWSTR * argvW, int argc) {
         return 0;
     }
     initMemory(memoryStart);
+    context = (Context *) memoryStart;
+    context->hInstance = GetModuleHandle(NULL);
+    context->common.keepRunning = true;
+    context->renderer.drawBitmapData = {};
     
     
     bool privileges = jettisonAllPrivileges() == ERROR_SUCCESS;
@@ -223,122 +307,129 @@ static inline int main(LPWSTR * argvW, int argc) {
     bool argvSuccess = success;
     
     
-    renderingTarget.info.bitsPerSample = 8;
-    renderingTarget.info.samplesPerPixel = 4;
-    renderingTarget.info.interpretation = BitmapInterpretationType_ARGB;
-    renderingTarget.info.origin = BitmapOriginType_TopLeft;
+    
+    bool configSuccess = loadConfig("data/server.config", loadPlatformConfig);
+    
+    ASSERT(configSuccess);
+    
+    NetSocketSettings settings;
+    settings.blocking = false;
+    bool socketResult = initNet() && initSocket(&context->common.serverSocket, context->ip, context->port, &settings);
+    ASSERT(socketResult);
+    
+    bool threadResult = true;
+    
+    threadResult &= createThread(&context->beaconsThread, beaconsPlatform, NULL);
+    threadResult &= createThread(&context->serverThread, serverPlatform, NULL);
+    threadResult &= createThread(&context->boeingThread[0], (void (*)(void *))boeingPlatform, (void *)0);
+    threadResult &= createThread(&context->boeingThread[1], (void (*)(void *))boeingPlatform, (void *)1);
+    threadResult &= createThread(&context->processThread, processPlatform, NULL);
+    
+    
+    
+    
+    context->renderingTarget.info.bitsPerSample = 8;
+    context->renderingTarget.info.samplesPerPixel = 4;
+    context->renderingTarget.info.interpretation = BitmapInterpretationType_ARGB;
+    context->renderingTarget.info.origin = BitmapOriginType_TopLeft;
     
     WNDCLASSEX style = {};
     style.cbSize = sizeof(WNDCLASSEX);
     style.style = CS_OWNDC;
     style.lpfnWndProc = WindowProc;
-    style.hInstance = context.hInstance;
+    style.hInstance = context->hInstance;
     style.lpszClassName = "MainClass";
     bool registerWindow = RegisterClassEx(&style) != 0;
     
-    context.window = CreateWindowEx(NULL,
-                                    "MainClass", "Boeing", WS_OVERLAPPEDWINDOW | WS_SIZEBOX,
-                                    CW_USEDEFAULT, CW_USEDEFAULT,CW_USEDEFAULT, CW_USEDEFAULT, NULL, NULL, context.hInstance, NULL);
+    context->window = CreateWindowEx(NULL,
+                                     "MainClass", "Boeing", WS_OVERLAPPEDWINDOW | WS_SIZEBOX,
+                                     CW_USEDEFAULT, CW_USEDEFAULT,CW_USEDEFAULT, CW_USEDEFAULT, NULL, NULL, context->hInstance, NULL);
     
-    bool windowCreated = context.window != NULL;
+    bool windowCreated = context->window != NULL;
     
     bool initSuccess = initIo() && initTime() && initNet();
     
     
-    float32 accumulator = 0;
-    
-    float32 frameStartTime = 0;
-    
-    char * servercode = "servercode.dll";
-    char * servercodeCopy = "servercodeCopy.dll";
-    
-    LocalTime oldChangeTime = {};
     
     HMODULE serverLibrary = 0;
     
+    FileWatchHandle servercode;
     
-    if(initSuccess && windowCreated && registerWindow && argvSuccess && privileges && memory){
+    bool watchSuccess = watchFile("servercode.dll", &servercode);
+    
+    if(initSuccess && watchSuccess && configSuccess && socketResult && threadResult && windowCreated && registerWindow && argvSuccess && privileges && memory){
         
-        bool wasInit = false;
+        ShowWindow(context->window, SW_SHOWMAXIMIZED);
         
-        ShowWindow(context.window, SW_SHOWMAXIMIZED);
         
-        LocalTime newChangeTime;
         
-        while (!quit) {
+        while (context->common.keepRunning) {
             
-            if(getFileChangeTime(servercode, &newChangeTime)){
-                if(newChangeTime != oldChangeTime){
-                    
-                    if(close){
-                        close();
-                    }
-                    Sleep(100);
-                    FreeLibrary(serverLibrary);
-                    render = NULL;
-                    process = NULL;
-                    init = NULL;
-                    mockMemsData = NULL;
-                    
-                    if(CopyFile(servercode, servercodeCopy, false) > 0){
-                        
-                        serverLibrary = LoadLibrary(servercodeCopy);
-                        if(serverLibrary != NULL){
-                            process = (void (*)(float32*))GetProcAddress(serverLibrary, "process");
-                            render = (void (*)(void))GetProcAddress(serverLibrary, "render");
-                            mockMemsData = (void (*)(float32*))GetProcAddress(serverLibrary, "mockMemsData");
-                            init = (bool (*)(Image*,bool*,void*, bool))GetProcAddress(serverLibrary, "init");
-                            close = (void (*)(void))GetProcAddress(serverLibrary, "close");
-                            ASSERT(process && render && mockMemsData && init && close);
-                        }
-                        
-                        if(init){
-                            init(&renderingTarget, &quit, (void *)((byte*)mem.persistent + MEGABYTE(1)), wasInit);
-                            wasInit = true;
-                        }
-                        
-                        
-                        oldChangeTime = newChangeTime;
-                    }
-                }
+            if(hasDllChangedAndReloaded(&servercode, &serverLibrary, customWait)){
+                OBTAINDLLFUNC(serverLibrary, beaconsDomainRoutine);
+                OBTAINDLLFUNC(serverLibrary, serverDomainRoutine);
+                OBTAINDLLFUNC(serverLibrary, boeingDomainRoutine);
+                OBTAINDLLFUNC(serverLibrary, initDomainRoutine);
+                OBTAINDLLFUNC(serverLibrary, processDomainRoutine);
+                OBTAINDLLFUNC(serverLibrary, renderDomainRoutine);
             }
             
-            frameStartTime = getProcessCurrentTime();
+            if(serverLibrary == NULL){
+                beaconsDomainRoutine = NULL;
+                serverDomainRoutine = NULL;
+                boeingDomainRoutine = NULL;
+                initDomainRoutine = NULL;
+                processDomainRoutine = NULL;
+                renderDomainRoutine = NULL;
+            }else{
+                context->freeze = false;
+            }
+            
+            if(initDomainRoutine){
+                initDomainRoutine((void *)((byte*)&context->common), &context->renderingTarget);
+            }
+            
+            
+            
             
             MSG msg;
-            while(PeekMessage(&msg, context.window, 0, 0, PM_REMOVE))
+            while(PeekMessage(&msg, context->window, 0, 0, PM_REMOVE))
             {
                 TranslateMessage(&msg);
                 DispatchMessage(&msg);
             }
             
             
-            renderingTarget.info.width = renderer.width;
-            renderingTarget.info.height = renderer.height;
-            renderingTarget.data = (byte *)renderer.drawbuffer;
+            context->renderingTarget.info.width = context->renderer.width;
+            context->renderingTarget.info.height = context->renderer.height;
+            context->renderingTarget.data = (byte *)context->renderer.drawbuffer;
             
             
             
-            if(process != NULL && render != NULL){
-                if(mockMemsData != NULL){
-                    mockMemsData(&accumulator);
-                }
-                process(&accumulator);
-                render();
+            if(renderDomainRoutine != NULL){
+                renderDomainRoutine();
             }
             
-            InvalidateRect(context.window, NULL, TRUE);
+            InvalidateRect(context->window, NULL, TRUE);
             
-            accumulator += getProcessCurrentTime() - frameStartTime;
+            
         }
         
-        if(close != NULL){
-            close();
-        }
         
     }else{
         ASSERT(false);
     }
+    
+    joinThread(&context->serverThread);
+    joinThread(&context->beaconsThread);
+    joinThread(&context->boeingThread[0]);
+    joinThread(&context->boeingThread[1]);
+    joinThread(&context->processThread);
+    
+    closeSocket(&context->common.serverSocket);
+    closeSocket(&context->common.beaconsSocket);
+    closeSocket(&context->common.boeingSocket[0]);
+    closeSocket(&context->common.boeingSocket[1]);
     
     if (!VirtualFree(memoryStart, 0, MEM_RELEASE)) {
         //more like log it
@@ -353,9 +444,6 @@ static inline int main(LPWSTR * argvW, int argc) {
 int mainCRTStartup(){
     int argc = 0;
     LPWSTR * argv =  CommandLineToArgvW(GetCommandLineW(), &argc);
-    context.hInstance = GetModuleHandle(NULL);
-    quit = false;
-    renderer.drawBitmapData = {};
     
     int result = main(argv,argc);
     LocalFree(argv);
