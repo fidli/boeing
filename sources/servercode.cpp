@@ -114,6 +114,7 @@ struct ProgramContext : Common{
         uint32 physicalFrame;
         char * dataBuffer;
         bool run;
+        uint32 accumulatedSize;
     } modules[2];
     
     struct Beacon{
@@ -127,6 +128,7 @@ struct ProgramContext : Common{
     
     Image * renderingTarget;
     float32 accumulator;
+    uint32 beaconsAccumulatedSize;
     
     FileWatchHandle configFileWatch;
 };
@@ -143,54 +145,57 @@ extern "C" __declspec(dllexport) void boeingDomainRoutine(int index){
     Message wrap;
     
     if(programContext->keepRunning && module->run){
-        result.bufferLength = sizeof(Message);
-        result.buffer = (char *) &wrap;
+        result.bufferLength = sizeof(Message) - module->accumulatedSize;
+        result.buffer = ((char *) &wrap) + module->accumulatedSize;
         NetResultType resultCode = netRecv(&programContext->boeingSocket[index], &result);
         if(resultCode == NetResultType_Ok){
-            
-            ASSERT(wrap.data.length % sizeof(MemsData) == 0 && sizeof(MemsData) == 12);
-            
-            result.bufferLength = wrap.data.length; 
-            result.buffer = module->dataBuffer;
-            result.resultLength = 0;
-            uint16 accumulated = 0;
-            while(accumulated != wrap.data.length){
+            module->accumulatedSize += result.resultLength;
+            if(module->accumulatedSize == sizeof(Message)){
+                ASSERT(wrap.data.length % sizeof(MemsData) == 0 && sizeof(MemsData) == 12);
                 
-                
-                result.buffer = module->dataBuffer + accumulated;
-                result.bufferLength = wrap.data.length - accumulated;
+                result.bufferLength = wrap.data.length; 
+                result.buffer = module->dataBuffer;
                 result.resultLength = 0;
-                
-                resultCode = netRecv(&programContext->boeingSocket[index], &result);
-                accumulated += result.resultLength;
-                
-                if(resultCode != NetResultType_Ok){
-                    break;
+                uint16 accumulated = 0;
+                while(accumulated != wrap.data.length){
+                    
+                    
+                    result.buffer = module->dataBuffer + accumulated;
+                    result.bufferLength = wrap.data.length - accumulated;
+                    result.resultLength = 0;
+                    
+                    resultCode = netRecv(&programContext->boeingSocket[index], &result);
+                    accumulated += result.resultLength;
+                    
+                    if(resultCode != NetResultType_Ok){
+                        break;
+                    }
                 }
-            }
-            
-            ASSERT(accumulated == wrap.data.length);
-            
-            for(uint32 offset = 0; offset < wrap.data.length; offset += sizeof(MemsData)){
                 
-                MemsData * target = &module->data[module->headIndex];
+                ASSERT(accumulated == wrap.data.length);
                 
-                uint32 suboffset = 0;
-                target->accX = ((uint16)(*(module->dataBuffer + offset + suboffset)) << 8) + *(module->dataBuffer + offset + suboffset + 1);
-                suboffset += 2;
-                target->accY = ((uint16)(*(module->dataBuffer + offset + suboffset)) << 8) + *(module->dataBuffer + offset + suboffset + 1);
-                suboffset += 2;
-                target->accZ = ((uint16)(*(module->dataBuffer + offset + suboffset)) << 8) + *(module->dataBuffer + offset + suboffset + 1);
-                
-                suboffset += 2;
-                target->gyroX = ((uint16)(*(module->dataBuffer + offset + suboffset)) << 8) + *(module->dataBuffer + offset + suboffset + 1);
-                suboffset += 2;
-                target->gyroY = ((uint16)(*(module->dataBuffer + offset + suboffset)) << 8) + *(module->dataBuffer + offset + suboffset + 1);
-                suboffset += 2;
-                target->gyroZ = ((uint16)(*(module->dataBuffer + offset + suboffset)) << 8) + *(module->dataBuffer + offset + suboffset + 1);
-                
-                module->headIndex = (module->headIndex + 1) % ARRAYSIZE(module->data);
-                FETCH_AND_ADD(&module->stepsAvailable, 1);
+                for(uint32 offset = 0; offset < wrap.data.length; offset += sizeof(MemsData)){
+                    
+                    MemsData * target = &module->data[module->headIndex];
+                    
+                    uint32 suboffset = 0;
+                    target->accX = ((uint16)(*(module->dataBuffer + offset + suboffset)) << 8) + *(module->dataBuffer + offset + suboffset + 1);
+                    suboffset += 2;
+                    target->accY = ((uint16)(*(module->dataBuffer + offset + suboffset)) << 8) + *(module->dataBuffer + offset + suboffset + 1);
+                    suboffset += 2;
+                    target->accZ = ((uint16)(*(module->dataBuffer + offset + suboffset)) << 8) + *(module->dataBuffer + offset + suboffset + 1);
+                    
+                    suboffset += 2;
+                    target->gyroX = ((uint16)(*(module->dataBuffer + offset + suboffset)) << 8) + *(module->dataBuffer + offset + suboffset + 1);
+                    suboffset += 2;
+                    target->gyroY = ((uint16)(*(module->dataBuffer + offset + suboffset)) << 8) + *(module->dataBuffer + offset + suboffset + 1);
+                    suboffset += 2;
+                    target->gyroZ = ((uint16)(*(module->dataBuffer + offset + suboffset)) << 8) + *(module->dataBuffer + offset + suboffset + 1);
+                    
+                    module->headIndex = (module->headIndex + 1) % ARRAYSIZE(module->data);
+                    FETCH_AND_ADD(&module->stepsAvailable, 1);
+                }
+                module->accumulatedSize = 0;
             }
         }else{
             closeSocket(&programContext->boeingSocket[index]);
@@ -205,12 +210,17 @@ extern "C" __declspec(dllexport) void beaconsDomainRoutine(){
     NetRecvResult result;
     result.bufferLength = sizeof(Message);
     Message message;
-    result.buffer = (char *) &message;
-    if(programContext->beaconsRun){
+    if(programContext->keepRunning && programContext->beaconsRun){
+        result.bufferLength = sizeof(Message) - programContext->beaconsAccumulatedSize;
+        result.buffer = ((char *) &message) + programContext->beaconsAccumulatedSize;
         NetResultType resultCode = netRecv(&programContext->beaconsSocket, &result);
         if(resultCode == NetResultType_Ok){
-            ASSERT(message.type == MessageType_Data);
-            //todo beacons processing
+            programContext->beaconsAccumulatedSize += result.resultLength;
+            if(programContext->beaconsAccumulatedSize == sizeof(Message)){
+                ASSERT(message.type == MessageType_Data);
+                //todo beacons processing
+                programContext->beaconsAccumulatedSize = 0;
+            }
             
         }else{
             closeSocket(&programContext->beaconsSocket);
@@ -219,12 +229,17 @@ extern "C" __declspec(dllexport) void beaconsDomainRoutine(){
     }
 }
 
+void resetBeacons(){
+    programContext->beaconsAccumulatedSize = 0;
+}
+
 void resetModule(int index){
     ProgramContext::Module * module = &programContext->modules[index];
     module->tailIndex = 0;
     module->headIndex = 0;
     module->stepsAvailable = 0;
     module->physicalFrame = 0;
+    module->accumulatedSize = 0;
     
     module->orientation = V3(0, 0, 0);
     module->position = V3(0, 0, 0);
@@ -245,7 +260,7 @@ void resetModule(int index){
 extern "C" __declspec(dllexport) void serverDomainRoutine(){
     if(!inited || !programContext->inited) return;
     NetSocketSettings settings;
-    settings.blocking = true;
+    settings.blocking = false;
     NetSocket socket;
     if(tcpAccept(&programContext->serverSocket, &socket, &settings)){
         NetRecvResult result;
@@ -310,6 +325,7 @@ extern "C" __declspec(dllexport) void serverDomainRoutine(){
                     beacon->frequency = wrap->init.beacon.frequency;
                 }
                 programContext->beaconsSocket = socket;
+                resetBeacons();
                 programContext->beaconsRun = true;
             }
         }else{

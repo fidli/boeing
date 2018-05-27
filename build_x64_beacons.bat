@@ -10,9 +10,6 @@ set LIBS="Kernel32.lib" "Advapi32.lib" "Shell32.lib" "User32.lib" "Ws2_32.lib" "
 
 set BASELIB="%cd%\baselib"
 set SOURCEFOLD="%cd%\sources"
-pushd build
-del *.pdb
-del *.obj 
 
 
 rem CANNOT USE SOME C++ FEATURES, std lib is ripped off (https://hero.handmade.network/forums/code-discussion/t/94)
