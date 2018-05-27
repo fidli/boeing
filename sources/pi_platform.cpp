@@ -24,26 +24,75 @@
 #include "linux_thread.cpp"
 
 
-#include "wiringPi.h"
-#include "wiringPiI2C.h"
 
-
-#include "linux_serial.cpp"
-#include "mpu6050.cpp"
 #include "linux_net.cpp"
+#include "linux_time.cpp"
+#include "linux_dll.cpp"
+
+#include "boeing_common.h"
+
+struct Context{
+    bool pumpMemsRunning;
+    bool pumpXbRunning;
+    Thread memsThread;
+    Thread xbThread;
+    bool freeze;
+    Common common;
+};
+
+Context * context;
+
+DEFINEDLLFUNC(void, initDomainRoutine, void *);
+DEFINEDLLFUNC(void, processDomainRoutine, void);
+DEFINEDLLFUNC(void, pumpMemsDomainRoutine, void);
+DEFINEDLLFUNC(void, pumpXbDomainRoutine, void);
 
 
-#include "pi_domain.cpp"
 
 
+static void pumpMemsPlatform(void *){
+    while(context->common.keepRunning){
+        if(!context->freeze && pumpMemsDomainRoutine != NULL){
+            context->pumpMemsRunning = true;
+            pumpMemsDomainRoutine();
+            context->pumpMemsRunning = false;
+        }else{
+            sleep(1);
+        }
+    }
+}
 
-bool initPlatform()
-{
+static void pumpXbPlatform(void *){
+    while(context->common.keepRunning){
+        if(!context->freeze && pumpXbDomainRoutine != NULL){
+            context->pumpXbRunning = true;
+            pumpXbDomainRoutine();
+            context->pumpXbRunning = false;
+        }else{
+            sleep(1);
+        }
+    }
+}
+
+void customWait(){
+    context->freeze = true;
+    while(context->pumpXbRunning);
+    while(context->pumpMemsRunning);
+}
+
+
+int main(int argc, char ** argv) {
     
     void * memoryStart = valloc(TEMP_MEM + PERSISTENT_MEM + STACK_MEM);
     if (memoryStart)
     {
         initMemory(memoryStart);
+        
+        context = (Context *) memoryStart;
+        context->common.keepRunning = true;
+        
+        PPUSHA(char, MEGABYTE(8));
+        void * domainMemory = (void*)&context->common;
         
         if(!initNet()){
             return false;
@@ -51,31 +100,55 @@ bool initPlatform()
         initTime();
         
         
-        domainState = (DomainState *) mem.persistent;
-        ASSERT(PERSISTENT_MEM >= sizeof(DomainState));
+        bool threadResult = true;
         
-        wiringPiSetup();
+        threadResult &= createThread(&context->memsThread, pumpMemsPlatform, NULL);
+        threadResult &= createThread(&context->xbThread, pumpXbPlatform, NULL);
         
-        domainState->memsHandle.fd = wiringPiI2CSetup(0x68);
+        void * domainLibrary = NULL;
         
-        if(domainState->memsHandle.fd < 0){
-            return false;
+        FileWatchHandle domaincode;
+        
+        bool watchSuccess = watchFile("./domain.so", &domaincode);
+        
+        
+        if(threadResult && watchSuccess){
+            
+            while (context->common.keepRunning) {
+                
+                if(hasDllChangedAndReloaded(&domaincode, &domainLibrary, customWait)){
+                    OBTAINDLLFUNC(domainLibrary, pumpXbDomainRoutine);
+                    OBTAINDLLFUNC(domainLibrary, pumpMemsDomainRoutine);
+                    OBTAINDLLFUNC(domainLibrary, initDomainRoutine);
+                    OBTAINDLLFUNC(domainLibrary, processDomainRoutine);
+                }
+                
+                if(domainLibrary == NULL){
+                    pumpXbDomainRoutine = NULL;
+                    pumpMemsDomainRoutine = NULL;
+                    processDomainRoutine = NULL;
+                    initDomainRoutine = NULL;
+                }else{
+                    context->freeze = false;
+                    if(initDomainRoutine){
+                        initDomainRoutine(domainMemory);
+                    }
+                }
+                
+                if(processDomainRoutine){
+                    processDomainRoutine();
+                }
+                
+            }
+            
+            
+            closeSocket(&context->common.boeingSocket);
+            joinThread(&context->memsThread);
+            joinThread(&context->xbThread);
+            
+            free(memoryStart);
         }
         
-        
-        
-        return true;
     }
-    
-    return false;
-}
-
-
-
-int main(int argc, char ** argv) {
-    bool keepRunning = initPlatform();
-    if(keepRunning){
-        domainRun();
-    }
-    
+    return 0;
 }

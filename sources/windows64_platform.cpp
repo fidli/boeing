@@ -358,7 +358,6 @@ static inline int main(LPWSTR * argvW, int argc) {
         ShowWindow(context->window, SW_SHOWMAXIMIZED);
         
         
-        
         while (context->common.keepRunning) {
             
             if(hasDllChangedAndReloaded(&servercode, &serverLibrary, customWait)){

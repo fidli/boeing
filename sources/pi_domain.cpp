@@ -3,8 +3,19 @@
 #include "string.h"
 #include "stdio.h"
 #include <unistd.h>
+
+#include "wiringPi.h"
+#include "wiringPiI2C.h"
+
+
+#include "linux_serial.cpp"
+
 #include "mpu6050.cpp"
 #include "messages.h"
+
+#define PERSISTENT_MEM MEGABYTE(1)
+#define TEMP_MEM MEGABYTE(6)
+#define STACK_MEM MEGABYTE(1)
 
 #include "common.h"
 #include "util_mem.h"
@@ -14,7 +25,9 @@
 #include "util_thread.h"
 #include "xbs2.cpp"
 
-struct DomainState{
+#include "boeing_common.h"
+
+struct DomainState : Common{
     MPU6050Handle memsHandle;
     NetSocket localSocket;
     byte fifoData[4092];
@@ -29,71 +42,83 @@ struct DomainState{
     uint16 xbFreq;
     char channel[3];
     char pan[5];
-    
+    bool inited;
 };
+
+bool inited = false;
 
 DomainState * domainState;
 
+extern "C" void pumpXbDomainRoutine(){
+    if(!inited || !domainState->inited) return;
+}
 
-void pollModule(bool * go){
-    while(*go){
-        if(domainState->haltPolling){
-            domainState->pollHalted = true;
-            domainState->haltPolling = false;
-            while(domainState->pollHalted){}
-        }
-        
-        //usleep(100000);
-        uint16 result = mpu6050_fifoCount(&domainState->memsHandle);
-        
-        if(result >= 1024){
-            printf("overflow, fuk: result: %hu\n", result);
-            result = 1024;
-        }
-        
-        uint16 size = ARRAYSIZE(domainState->fifoData);
-        uint16 tail = (domainState->head + result) % size;
-        
-        for(uint16 i = domainState->head; i != tail; i = (i+1) % size)
-            //for(uint16 i = 0; i < result; i++)
-        {
-            uint8 data = mpu6050_readFifoByte(&domainState->memsHandle);
-            domainState->fifoData[i] = data;
-#if 0
-            int16 toPrint;
-            if(i&1){
-                toPrint = ((domainState->fifoData[i-1]) << 8) | data;
-            }
-            if(i%12 == 1){
-                printf("muzzletop\n");
-                printf("ax: %hd", toPrint);
-            }
-            if(i%12 == 3){
-                printf(" ay: %hd", toPrint);
-            }
-            if(i%12 == 5){
-                printf(" az: %hd\n", toPrint);
-            }
-            if(i%12 == 7){
-                printf("gx: %hd", toPrint);
-            }
-            if(i%12 == 9){
-                printf(" gy: %hd", toPrint);
-            }
-            if(i%12 == 11){
-                printf(" gz: %hd i:(%hu)\n", toPrint, i);
-            }
-#endif
-        }
-        domainState->head = tail;
-        FETCH_AND_ADD(&domainState->fifoCount, result);
-        
+
+extern "C" pumpMemsDomainRoutine(){
+    if(!inited || !domainState->inited) return;
+    
+    if(domainState->haltPolling){
+        domainState->pollHalted = true;
+        domainState->haltPolling = false;
+        while(domainState->pollHalted){}
     }
+    
+    uint16 result = mpu6050_fifoCount(&domainState->memsHandle);
+    
+    if(result >= 1024){
+        printf("overflow, fuk: result: %hu\n", result);
+        result = 1024;
+    }
+    
+    uint16 size = ARRAYSIZE(domainState->fifoData);
+    uint16 tail = (domainState->head + result) % size;
+    
+    for(uint16 i = domainState->head; i != tail; i = (i+1) % size)
+        //for(uint16 i = 0; i < result; i++)
+    {
+        uint8 data = mpu6050_readFifoByte(&domainState->memsHandle);
+        domainState->fifoData[i] = data;
+#if 0
+        int16 toPrint;
+        if(i&1){
+            toPrint = ((domainState->fifoData[i-1]) << 8) | data;
+        }
+        if(i%12 == 1){
+            printf("muzzletop\n");
+            printf("ax: %hd", toPrint);
+        }
+        if(i%12 == 3){
+            printf(" ay: %hd", toPrint);
+        }
+        if(i%12 == 5){
+            printf(" az: %hd\n", toPrint);
+        }
+        if(i%12 == 7){
+            printf("gx: %hd", toPrint);
+        }
+        if(i%12 == 9){
+            printf(" gy: %hd", toPrint);
+        }
+        if(i%12 == 11){
+            printf(" gz: %hd i:(%hu)\n", toPrint, i);
+        }
+#endif
+    }
+    domainState->head = tail;
+    FETCH_AND_ADD(&domainState->fifoCount, result);
+    
+    
 }
 
 #define IMMEDIATE 0
 
-void connectToServer(volatile bool * go){
+extern "C" void initDomainRoutine(void * memoryStart){
+    
+    initMemory(memoryStart);
+    initNet();
+    
+    domainState = (DomainState *) memoryStart;
+    
     domainState->haltPolling = true;
 #if IMMEDIATE
 #else
@@ -167,8 +192,13 @@ void connectToServer(volatile bool * go){
     domainState->pollHalted = false;
 }
 
-void domainRun(){
-    volatile bool go = true;
+
+
+
+
+
+extern "C" void processDomainRoutine(){
+    if(!inited || !domainState->inited) return;
     
     
     
