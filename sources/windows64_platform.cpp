@@ -45,9 +45,9 @@ extern "C"{
 #include "windows_time.cpp"
 
 
-#define PERSISTENT_MEM MEGABYTE(1+100+100+1)
+#define PERSISTENT_MEM MEGABYTE(1)
 #define TEMP_MEM MEGABYTE(1)
-#define STACK_MEM MEGABYTE(1)
+#define STACK_MEM MEGABYTE(1+100+100+1)
 
 #include "windows_time.cpp"
 
@@ -116,8 +116,6 @@ struct Context{
     Thread beaconsThread;
     Thread boeingThread[2];
     Thread processThread;
-    char ip[16];
-    char port[6];
     bool freeze;
     bool serverRunning;
     bool processRunning;
@@ -206,13 +204,6 @@ DEFINEDLLFUNC(void, processDomainRoutine, void);
 DEFINEDLLFUNC(void, renderDomainRoutine, void);
 
 
-static bool loadPlatformConfig(const char * line){
-    if(!strncmp("ip", line, 2)){
-        return sscanf(line, "ip %16[^ ] %6[^\r\n]", context->ip, context->port) == 2;
-    }
-    return true;
-}
-
 
 static void beaconsPlatform(void *){
     while(context->common.keepRunning){
@@ -220,6 +211,8 @@ static void beaconsPlatform(void *){
             context->beaconsRunning = true;
             beaconsDomainRoutine();
             context->beaconsRunning = false;
+        }else{
+            Sleep(1000);
         }
     }
 }
@@ -232,6 +225,8 @@ static void serverPlatform(void *){
             context->serverRunning = true;
             serverDomainRoutine();
             context->serverRunning = false;
+        }else{
+            Sleep(1000);
         }
     }
 }
@@ -242,6 +237,8 @@ static void boeingPlatform(int index){
             context->boeingRunning[index] = true;
             boeingDomainRoutine(index);
             context->boeingRunning[index] = false;
+        }else{
+            Sleep(1000);
         }
     }
 }
@@ -252,6 +249,8 @@ static void processPlatform(void *){
             context->processRunning = true;
             processDomainRoutine();
             context->processRunning = false;
+        }else{
+            Sleep(1000);
         }
     }
 }
@@ -285,6 +284,9 @@ static inline int main(LPWSTR * argvW, int argc) {
     context->common.keepRunning = true;
     context->renderer.drawBitmapData = {};
     
+    PPUSHA(char, MEGABYTE(201));
+    void * domainMemory = (void*)&context->common;
+    
     
     bool privileges = jettisonAllPrivileges() == ERROR_SUCCESS;
     
@@ -299,7 +301,7 @@ static inline int main(LPWSTR * argvW, int argc) {
         success &= res != 0;
         uint32 finalLen;
         //this is more or equal to real needed
-        argv[i] = &PPUSHA(char, toAlloc);
+        argv[i] = &PUSHA(char, toAlloc);
         if(convUTF8toAscii((byte *)argvUTF8[i], toAlloc, &argv[i], &finalLen) != 0){
             printf("Error: argument is not fully ascii compatible - those characters were replaced by '_'. Please use simple ASCII parameter values\n");
         }
@@ -308,13 +310,7 @@ static inline int main(LPWSTR * argvW, int argc) {
     
     
     
-    bool configSuccess = loadConfig("data/server.config", loadPlatformConfig);
-    
-    ASSERT(configSuccess);
-    
-    NetSocketSettings settings;
-    settings.blocking = false;
-    bool socketResult = initNet() && initSocket(&context->common.serverSocket, context->ip, context->port, &settings);
+    bool socketResult = initNet();
     ASSERT(socketResult);
     
     bool threadResult = true;
@@ -357,7 +353,7 @@ static inline int main(LPWSTR * argvW, int argc) {
     
     bool watchSuccess = watchFile("servercode.dll", &servercode);
     
-    if(initSuccess && watchSuccess && configSuccess && socketResult && threadResult && windowCreated && registerWindow && argvSuccess && privileges && memory){
+    if(initSuccess && watchSuccess  && socketResult && threadResult && windowCreated && registerWindow && argvSuccess && privileges && memory){
         
         ShowWindow(context->window, SW_SHOWMAXIMIZED);
         
@@ -383,13 +379,10 @@ static inline int main(LPWSTR * argvW, int argc) {
                 renderDomainRoutine = NULL;
             }else{
                 context->freeze = false;
+                if(initDomainRoutine){
+                    initDomainRoutine(domainMemory, &context->renderingTarget);
+                }
             }
-            
-            if(initDomainRoutine){
-                initDomainRoutine((void *)((byte*)&context->common), &context->renderingTarget);
-            }
-            
-            
             
             
             MSG msg;

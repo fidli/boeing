@@ -58,6 +58,11 @@ extern "C"{
 #include "windows_time.cpp"
 #include "util_conv.cpp"
 
+#include "windows_dll.cpp"
+
+#include "util_config.cpp"
+
+
 
 
 static inline DWORD jettisonAllPrivileges() {
@@ -86,19 +91,46 @@ static inline DWORD jettisonAllPrivileges() {
     return result;
 }
 
+#include "windows_thread.cpp"
+
+#include "beacons_common.h"
+
+#include "windows_dll.cpp"
 
 struct Context{
     HINSTANCE hInstance;
-    
+    Thread beaconThread[4];
+    bool freeze;
+    bool beaconRunning[4];
+    Common common;
 };
 
-bool quit;
+Context * context;
 
-Context context;
+DEFINEDLLFUNC(void, beaconDomainRoutine, int);
+DEFINEDLLFUNC(void, initDomainRoutine, void *);
+DEFINEDLLFUNC(void, iterateDomainRoutine, void);
 
 
-bool (*initDomain)(void *);
-void (*iterateDomain)();
+static void beaconPlatform(int index){
+    while(context->common.keepRunning){
+        if(!context->freeze && beaconDomainRoutine != NULL){
+            context->beaconRunning[index] = true;
+            beaconDomainRoutine(index);
+            context->beaconRunning[index] = false;
+        }else{
+            Sleep(1000);
+        }
+    }
+}
+
+void customWait(){
+    context->freeze = true;
+    for(uint8 i = 0; i < ARRAYSIZE(context->beaconThread); i++){
+        while(context->beaconRunning[i]);
+    }
+}
+
 
 static inline int main(LPWSTR * argvW, int argc) {
     
@@ -111,8 +143,11 @@ static inline int main(LPWSTR * argvW, int argc) {
         return 0;
     }
     initMemory(memoryStart);
+    context = (Context *) memoryStart;
+    context->common.keepRunning = true;
     
-    void * domainMemory = (void*)&PPUSHA(char, MEGABYTE(100));
+    PPUSHA(char, MEGABYTE(100));
+    void * domainMemory = (void*)&context->common;
     
     bool privileges = jettisonAllPrivileges() == ERROR_SUCCESS;
     
@@ -138,57 +173,58 @@ static inline int main(LPWSTR * argvW, int argc) {
     }
     bool argvSuccess = success;
     
-    
     bool initSuccess = initNet() && initIo();
     
+    bool threadResult = true;
     
-    if(initSuccess && argvSuccess && privileges){
-        char codeFilename[256] = "beacons_domain.dll";
-        char codeFilenameCopy[256] = "beacons_domain_temp.dll";
-        FileWatchHandle dll;
-        HMODULE domainCode = NULL;
-        if(watchFile(codeFilename, &dll)){
+    for(uint8 i = 0; i < ARRAYSIZE(context->beaconThread); i++){
+        threadResult &= createThread(&context->beaconThread[i], (void (*)(void *))beaconPlatform, (void *) i);
+    }
+    
+    HMODULE beaconsLibrary = 0;
+    
+    FileWatchHandle beaconsCode;
+    
+    bool watchSuccess = watchFile("beacons_domain.dll", &beaconsCode);
+    
+    
+    if(initSuccess && argvSuccess && threadResult && privileges && watchSuccess){
+        
+        while(context->common.keepRunning){
             
-            bool wasInit = false;
-            
-            while(!quit){
-                
-                if((domainCode == NULL || hasFileChanged(&dll))){
-                    
-                    while(!CopyFile(codeFilename, codeFilenameCopy, FALSE));
-                    if(domainCode != NULL){
-                        FreeLibrary(domainCode);
-                    }
-                    domainCode = NULL;
-                    HMODULE temp;
-                    temp =  LoadLibrary(codeFilenameCopy);
-                    if(temp){
-                        
-                        initDomain = (bool(*)(void *))GetProcAddress(temp, "initDomain");
-                        iterateDomain = (void(*)(void))GetProcAddress(temp, "iterateDomain");
-                        if(initDomain && iterateDomain){
-                            domainCode = temp;
-                            print("Domain code reloaded\r\n");
-                        }
-                    }
-                    
-                }
-                
-                if(!wasInit){
-                    if(domainCode){
-                        wasInit = initDomain(domainMemory);
-                    }
-                }
-                
-                iterateDomain();
+            if(hasDllChangedAndReloaded(&beaconsCode, &beaconsLibrary, customWait)){
+                OBTAINDLLFUNC(beaconsLibrary, beaconDomainRoutine);
+                OBTAINDLLFUNC(beaconsLibrary, initDomainRoutine);
+                OBTAINDLLFUNC(beaconsLibrary, iterateDomainRoutine);
                 
             }
+            
+            if(beaconsLibrary == NULL){
+                initDomainRoutine = NULL;
+                iterateDomainRoutine = NULL;
+                beaconDomainRoutine = NULL;
+            }else{
+                context->freeze = false;
+                if(initDomainRoutine){
+                    initDomainRoutine(domainMemory);
+                }
+            }
+            
+            
+            if(iterateDomainRoutine){
+                iterateDomainRoutine();
+            }
+            
         }
-        
         
         
     }
     
+    closeSocket(&context->common.beaconsSocket);
+    
+    for(uint8 i = 0; i < ARRAYSIZE(context->beaconThread); i++){
+        joinThread(&context->beaconThread[i]);
+    }
     
     if (!VirtualFree(memoryStart, 0, MEM_RELEASE)) {
         //more like log it
@@ -203,8 +239,6 @@ static inline int main(LPWSTR * argvW, int argc) {
 int mainCRTStartup(){
     int argc = 0;
     LPWSTR * argv =  CommandLineToArgvW(GetCommandLineW(), &argc);
-    context.hInstance = GetModuleHandle(NULL);
-    quit = false;
     int result = main(argv,argc);
     LocalFree(argv);
     ExitProcess(result);

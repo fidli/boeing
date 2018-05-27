@@ -129,13 +129,11 @@ bool xbs2_initNetwork(XBS2Handle * module, const char * channelMask = "1FFE"){
         
         char command[10];
         success = success && sprintf(command, "ATSC%4s\r", channelMask) != -1 && xbs2_sendMessage(module, command)  && waitForAnyMessage(module, result) > 0 && !strncmp("OK\r", result, 3);
-        printf("setting mask, success %hhd, result %s\n", success, result);
         
         success = success && xbs2_sendMessage(module, "ATNR0\r")  && waitForAnyMessage(module, result) > 0 && !strncmp("OK\r", result, 3);
         
         //wait for network restart
-        wait(1);
-        printf("network reseted, success %hhd \n", success);
+        wait(2);
         if(success && xbs2_enterCommandMode(module)){
             
             success = success && xbs2_sendMessage(module, "ATAI\r")  && waitForAnyMessage(module, result) > 0 && !strncmp("0\r", result, 2); 

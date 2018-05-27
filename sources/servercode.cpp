@@ -84,6 +84,9 @@ struct MemsData{
 struct ProgramContext : Common{
     bool inited;
     BitmapFont font;
+    NetSocket serverSocket;
+    NetSocket boeingSocket[2];
+    NetSocket beaconsSocket;
     struct Module{
         
         char name;
@@ -125,6 +128,7 @@ struct ProgramContext : Common{
     Image * renderingTarget;
     float32 accumulator;
     
+    FileWatchHandle configFileWatch;
 };
 
 ProgramContext * programContext;
@@ -315,6 +319,19 @@ extern "C" __declspec(dllexport) void serverDomainRoutine(){
     
 }
 
+#include "util_config.cpp"
+
+const char * configPath = "data/server.config";
+
+static bool parseConfig(const char * line){
+    if(!strncmp("ip", line, 2)){
+        memset(programContext->ip, 0, 16);
+        memset(programContext->port, 0, 6);
+        return sscanf(line, "ip %16[^ ] %6[^\r\n ]", programContext->ip, programContext->port) == 2;
+    }
+    return true;
+}
+
 
 extern "C" __declspec(dllexport) void initDomainRoutine(void * memoryStart, Image * renderingTarget){
     
@@ -328,6 +345,16 @@ extern "C" __declspec(dllexport) void initDomainRoutine(void * memoryStart, Imag
     if(!programContext->inited){
         programContext->renderingTarget = renderingTarget;
         bool result = true;
+        
+        result &= watchFile(configPath, &programContext->configFileWatch);
+        ASSERT(result);
+        if(hasFileChanged(&programContext->configFileWatch)){
+            result &= loadConfig(configPath, parseConfig);
+        }else{
+            ASSERT(false);
+        }
+        
+        
         FileContents fontFile;
         result &= readFile("data\\font.bmp", &fontFile);
         Image source;
@@ -335,11 +362,17 @@ extern "C" __declspec(dllexport) void initDomainRoutine(void * memoryStart, Imag
         result &= flipY(&source);
         result &= initBitmapFont(&programContext->font, &source, source.info.width / 16);
         
-        result &= tcpListen(&programContext->serverSocket, 10);
+        
         
         
         programContext->modules[0].dataBuffer = &PUSHA(char, 4092);
         programContext->modules[1].dataBuffer = &PUSHA(char, 4092);
+        
+        NetSocketSettings settings;
+        settings.blocking = false;
+        result &= initSocket(&programContext->serverSocket, programContext->ip, programContext->port, &settings);
+        result &= tcpListen(&programContext->serverSocket, 10);
+        
         
         programContext->inited = result;
         
@@ -355,6 +388,11 @@ extern "C" __declspec(dllexport) void initDomainRoutine(void * memoryStart, Imag
 extern "C" __declspec(dllexport) void processDomainRoutine(){
     if(!inited || !programContext->inited) return;
     float32 start = getProcessCurrentTime();
+    
+    if(hasFileChanged(&programContext->configFileWatch)){
+        loadConfig(configPath, parseConfig);
+    }
+    
     
     float32 dt = 0;
     const float32 g = mpu6050_g;

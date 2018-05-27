@@ -25,6 +25,7 @@ call cl.exe /nologo /LD /W2 /WX /Od /GS- /Zi /FS /DSERVER /Fd"beacons_domain_%un
 
 cp -f beacons64.exe \\FIDLI-LAPTOP\hole\beacons64.exe
 cp -f beacons_domain.dll \\FIDLI-LAPTOP\hole\beacons_domain.dll
+cp -f data\beacons.config \\FIDLI-LAPTOP\hole\data\beacons.config
 
 POPD
                                                          

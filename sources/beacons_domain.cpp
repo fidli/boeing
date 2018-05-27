@@ -49,56 +49,93 @@ extern "C"{
 
 #include "util_net.h"
 
+#include "beacons_common.h"
+
 LocalTime lt;
 char logbuffer[1024];
 #define LOG(message)  lt = getLocalTime(); sprintf(logbuffer, "[%2hu.%2hu.%4hu %2hu:%2hu:%2hu] %900s\r\n", lt.day, lt.month, lt.year, lt.hour, lt.minute, lt.second, (message)); print(logbuffer);
 
-struct State{
+struct State : Common{
     XBS2Handle * coordinator;
     XBS2Handle serials[4];
     bool  inited;
-    NetSocket serverConnection;
+    FileWatchHandle configFileWatch;
+    char coms[4][6];
+    char coordinatorSid[9];
 };
 
 State * state;
 
-extern "C" __declspec(dllexport) bool initDomain(void * platformMemory){
+bool inited = false;
+
+#include "util_config.cpp"
+
+const char * configPath = "data/beacons.config";
+
+static bool parseConfig(const char * line){
+    if(!strncmp("ip", line, 2)){
+        memset(state->ip, 0, 16);
+        memset(state->port, 0, 6);
+        return sscanf(line, "ip %16[^ ] %6[^ \r\n]", state->ip, state->port) == 2;
+    }else if(!strncmp("com", line, 3)){
+        memset(state->coms[0], 0, 6);
+        memset(state->coms[1], 0, 6);
+        memset(state->coms[2], 0, 6);
+        memset(state->coms[3], 0, 6);
+        return sscanf(line, "com %6[^ ] %6[^ ] %6[^ ] %6[^ \r\n]", &state->coms[0], &state->coms[1], &state->coms[2], &state->coms[3]) == 4;
+    }
+    else if(!strncmp("coord", line, 5)){
+        memset(state->coordinatorSid, 0, 9);
+        return sscanf(line, "coord %9[^\r\n ]", &state->coordinatorSid) == 1;
+    }
+    return true;
+}
+
+
+
+extern "C" __declspec(dllexport) void initDomainRoutine(void * platformMemory){
     initMemory(platformMemory);
     if(!initIo()){
-        return false;
+        return;
     }
-    if(!initTime()) return false;
-    if(!initNet()) return false;
+    if(!initTime()) return;
+    if(!initNet()) return;
     state = (State *) platformMemory;
     ASSERT(sizeof(State) <= PERSISTENT_MEM);
     
-    char coms[4][6] = {"COM3", "COM5", "COM7", "COM8"};
-    char coordinator[] = "400A3EF2";
-    
     char path[10];
     if(!state->inited){
+        bool result = true;
+        result &= watchFile(configPath, &state->configFileWatch);
+        ASSERT(result);
+        if(hasFileChanged(&state->configFileWatch)){
+            result &= loadConfig(configPath, parseConfig);
+        }else{
+            ASSERT(false);
+        }
+        
 #if 1
         LOG("initing network");
-        for(uint8 serialIndex = 0; serialIndex < ARRAYSIZE(coms); serialIndex++){
+        for(uint8 serialIndex = 0; serialIndex < ARRAYSIZE(state->coms); serialIndex++){
             XBS2Handle * beacon = &state->serials[serialIndex];
             if(isHandleOpened(beacon)) continue;
             //this is actually windows specific, ignore for now
             LOG("opening handle");
-            sprintf(path, "\\\\?\\%5s", coms[serialIndex]);
+            sprintf(path, "\\\\?\\%5s", state->coms[serialIndex]);
             LOG(path);
             if(openHandle(path, beacon)){
                 if(xbs2_detectAndSetStandardBaudRate(beacon)){
                     if (!xbs2_initModule(beacon)){
                         LOG("failed to init module");
                         closeHandle(beacon);
-                        return false;
+                        return;
                     }
                     if (!xbs2_readValues(beacon)){
                         LOG("failed to read module values");
                         closeHandle(beacon);
-                        return false;
+                        return;
                     }
-                    if(!strncmp(coordinator, beacon->sidLower, 8)){
+                    if(!strncmp(state->coordinatorSid, beacon->sidLower, 8)){
                         state->coordinator = beacon;
                     }
                     LOG("handle opened and module inited");
@@ -106,9 +143,9 @@ extern "C" __declspec(dllexport) bool initDomain(void * platformMemory){
                 }
             }
             LOG("Failed to open handle");
-            return false;
+            return;
         }
-        
+        ASSERT(state->coordinator != NULL);
         LOG("finding channel");
         //find coordinator and reset network
         while(!xbs2_initNetwork(state->coordinator));
@@ -122,7 +159,7 @@ extern "C" __declspec(dllexport) bool initDomain(void * platformMemory){
         LOG(state->coordinator->pan);
         
         //reset network on others
-        for(uint8 serialIndex = 0; serialIndex < ARRAYSIZE(coms); serialIndex++){
+        for(uint8 serialIndex = 0; serialIndex < ARRAYSIZE(state->coms); serialIndex++){
             XBS2Handle * beacon = &state->serials[serialIndex];
             if(beacon != state->coordinator){
                 LOG("joining network with");
@@ -135,20 +172,20 @@ extern "C" __declspec(dllexport) bool initDomain(void * platformMemory){
         //all set
         //check network topology?
 #endif
-        LOG("XBS2 set. Connecting to the server");
-        //todo connect to server, annonce settings
+        LOG("XBS2 set");
+        
         NetSocketSettings connectionSettings;
         connectionSettings.reuseAddr = true;
         connectionSettings.blocking = true;
         LOG("opening socket");
-        if(!openSocket(&state->serverConnection, &connectionSettings)){
+        if(!openSocket(&state->beaconsSocket, &connectionSettings)){
             LOG("opening socket failed");
-            return false;
+            return;
         }
         LOG("connecting to server");
-        if(!tcpConnect(&state->serverConnection, "10.0.0.10", "25555")){
+        if(!tcpConnect(&state->beaconsSocket, state->ip, state->port)){
             LOG("connecting to server failed");
-            return false;
+            return;
         }
         
         LOG("connection successfull. Sending handshake message");
@@ -165,20 +202,25 @@ extern "C" __declspec(dllexport) bool initDomain(void * platformMemory){
         message.buffer = (char*)&handshake;
         message.bufferLength = sizeof(Message);
         
-        if(netSend(&state->serverConnection, &message) != NetResultType_Ok){
+        if(netSend(&state->beaconsSocket, &message) != NetResultType_Ok){
             LOG("failed to send handshake message");
         }
         
         LOG("all set.");
         state->inited = true;
     }
-    return state->inited;
+    inited = true;
 }
 
-extern "C" __declspec(dllexport) void iterateDomain(){
+extern "C" __declspec(dllexport) void beaconDomainRoutine(int index){
+    if(!inited || !state->inited) return;
+    //poll the fuckers
+}
+
+extern "C" __declspec(dllexport) void iterateDomainRoutine(){
+    if(!inited || !state->inited) return;
     
-    
-    int i = 0;
+    //forward to server
     
 }
 
