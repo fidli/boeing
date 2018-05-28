@@ -129,6 +129,7 @@ struct ProgramContext : Common{
     Image * renderingTarget;
     float32 accumulator;
     uint32 beaconsAccumulatedSize;
+    uint32 newClientAccumulatedSize;
     
     FileWatchHandle configFileWatch;
 };
@@ -230,7 +231,7 @@ extern "C" __declspec(dllexport) void beaconsDomainRoutine(){
 }
 
 void resetBeacons(){
-    programContext->beaconsAccumulatedSize = 0;
+    //programContext->beaconsAccumulatedSize = 0;
 }
 
 void resetModule(int index){
@@ -239,7 +240,7 @@ void resetModule(int index){
     module->headIndex = 0;
     module->stepsAvailable = 0;
     module->physicalFrame = 0;
-    module->accumulatedSize = 0;
+    //module->accumulatedSize = 0;
     
     module->orientation = V3(0, 0, 0);
     module->position = V3(0, 0, 0);
@@ -265,72 +266,83 @@ extern "C" __declspec(dllexport) void serverDomainRoutine(){
     if(tcpAccept(&programContext->serverSocket, &socket, &settings)){
         NetRecvResult result;
         result.bufferLength = sizeof(Message);
-        result.buffer = &PUSHA(char, result.bufferLength);
-        
+        Message message;
+        result.buffer = (char*)&message;
+        programContext->newClientAccumulatedSize = 0;
+        bool good = false;
         //is this boeing or beacons client ?
-        NetResultType resultCode = netRecv(&socket, &result);
-        if(resultCode == NetResultType_Ok){
-            
-            Message * wrap = (Message *) result.buffer;
-            ASSERT(wrap->type == MessageType_Init);
-            ClientType clientType = wrap->init.clientType;
-            if(clientType == ClientType_Boeing){
-                ASSERT(programContext->beaconsRun);
-                bool found = false;
-                uint32 i = 0;
-                for(; i < ARRAYSIZE(programContext->modules); i++){
-                    if(!programContext->modules[i].run){
-                        found = true;
-                        break;
+        NetResultType resultCode;
+        do{
+            result.bufferLength = sizeof(Message) - programContext->newClientAccumulatedSize;
+            result.buffer = ((char *) &message) + programContext->newClientAccumulatedSize;
+            resultCode = netRecv(&socket, &result);
+            programContext->newClientAccumulatedSize += result.resultLength;
+            if(programContext->newClientAccumulatedSize == sizeof(Message)){
+                
+                Message * wrap = &message;
+                ASSERT(wrap->type == MessageType_Init);
+                ClientType clientType = wrap->init.clientType;
+                if(clientType == ClientType_Boeing){
+                    ASSERT(programContext->beaconsRun);
+                    bool found = false;
+                    uint32 i = 0;
+                    for(; i < ARRAYSIZE(programContext->modules); i++){
+                        if(!programContext->modules[i].run){
+                            found = true;
+                            break;
+                        }
                     }
-                }
-                ASSERT(found);
-                
-                
-                ProgramContext::Module * module = &programContext->modules[i];
-                
-                programContext->boeingSocket[i] = socket;
-                
-                
-                module->name = wrap->init.boeing.name;
-                module->settings = wrap->init.boeing.settings;
-                ASSERT(wrap->init.boeing.settings.sampleRate == 250);
-                
-                ProgramContext::Beacon * aBeacon = &programContext->beacons[0];
-                
-                Message handshake;
-                handshake.type = MessageType_Init;
-                handshake.init.clientType = ClientType_Beacon;
-                handshake.init.beacon.frequency = aBeacon->frequency;
-                strncpy(handshake.init.beacon.channel, aBeacon->channel, 3);
-                strncpy(handshake.init.beacon.pan, aBeacon->pan, 5);
-                
-                NetSendSource message;
-                message.buffer = (char*)&handshake;
-                message.bufferLength = sizeof(Message);
-                
-                while(netSend(&programContext->boeingSocket[i], &message) != NetResultType_Ok){
+                    ASSERT(found);
                     
-                }
-                //default attributes
-                resetModule(i);
-                module->run = true;
-                
-            }else if(clientType == ClientType_Beacon){
-                for(uint8 i = 0; i < ARRAYSIZE(programContext->beacons); i++){
-                    ProgramContext::Beacon * beacon = &programContext->beacons[i];
                     
-                    strncpy(beacon->channel, wrap->init.beacon.channel, 3);
-                    strncpy(beacon->pan, wrap->init.beacon.pan, 5);
-                    beacon->frequency = wrap->init.beacon.frequency;
+                    ProgramContext::Module * module = &programContext->modules[i];
+                    
+                    programContext->boeingSocket[i] = socket;
+                    
+                    
+                    module->name = wrap->init.boeing.name;
+                    module->settings = wrap->init.boeing.settings;
+                    ASSERT(wrap->init.boeing.settings.sampleRate == 250);
+                    
+                    ProgramContext::Beacon * aBeacon = &programContext->beacons[0];
+                    
+                    Message handshake;
+                    handshake.type = MessageType_Init;
+                    handshake.init.clientType = ClientType_Beacon;
+                    handshake.init.beacon.frequency = aBeacon->frequency;
+                    strncpy(handshake.init.beacon.channel, aBeacon->channel, 3);
+                    strncpy(handshake.init.beacon.pan, aBeacon->pan, 5);
+                    
+                    NetSendSource message;
+                    message.buffer = (char*)&handshake;
+                    message.bufferLength = sizeof(Message);
+                    
+                    while(netSend(&programContext->boeingSocket[i], &message) != NetResultType_Ok){
+                        
+                    }
+                    //default attributes
+                    resetModule(i);
+                    module->run = true;
+                    
+                }else if(clientType == ClientType_Beacon){
+                    for(uint8 i = 0; i < ARRAYSIZE(programContext->beacons); i++){
+                        ProgramContext::Beacon * beacon = &programContext->beacons[i];
+                        
+                        strncpy(beacon->channel, wrap->init.beacon.channel, 3);
+                        strncpy(beacon->pan, wrap->init.beacon.pan, 5);
+                        beacon->frequency = wrap->init.beacon.frequency;
+                    }
+                    programContext->beaconsSocket = socket;
+                    resetBeacons();
+                    programContext->beaconsRun = true;
+                }else{
+                    INV;
                 }
-                programContext->beaconsSocket = socket;
-                resetBeacons();
-                programContext->beaconsRun = true;
+                good = true;
+                break;
             }
-        }else{
-            closeSocket(&socket);
-        }
+        }while(resultCode == NetResultType_Ok);
+        if(!good) closeSocket(&socket);
     }
     
 }

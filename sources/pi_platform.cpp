@@ -111,6 +111,7 @@ int main(int argc, char ** argv) {
         
         bool watchSuccess = watchFile("./domain.so", &domaincode);
         
+        printf("startup, thread result %hhu, watch success %hhu\n", threadResult, watchSuccess);
         
         if(threadResult && watchSuccess){
             
@@ -121,6 +122,7 @@ int main(int argc, char ** argv) {
                     OBTAINDLLFUNC(domainLibrary, pumpMemsDomainRoutine);
                     OBTAINDLLFUNC(domainLibrary, initDomainRoutine);
                     OBTAINDLLFUNC(domainLibrary, processDomainRoutine);
+                    printf("dll changed ptrs %hhu, %hhu, %hhu, %hhu\n", pumpXbDomainRoutine != 0, pumpMemsDomainRoutine != 0, initDomainRoutine != 0, processDomainRoutine != 0);
                 }
                 
                 if(domainLibrary == NULL){

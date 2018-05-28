@@ -13,9 +13,6 @@
 #include "mpu6050.cpp"
 #include "messages.h"
 
-#define PERSISTENT_MEM MEGABYTE(1)
-#define TEMP_MEM MEGABYTE(6)
-#define STACK_MEM MEGABYTE(1)
 
 #include "common.h"
 #include "util_mem.h"
@@ -29,39 +26,40 @@
 
 struct DomainState : Common{
     MPU6050Handle memsHandle;
-    NetSocket localSocket;
     byte fifoData[4092];
     int16 head;
     int16 tail;
-    Thread poller;
     uint16 fifoCount;
-    bool haltPolling;
-    bool pollHalted;
+    
+    char memsSendBuffer[4096];
+    
+    char id;
     
     XBS2Handle xb;
     uint16 xbFreq;
     char channel[3];
     char pan[5];
     bool inited;
+    
+    FileWatchHandle configFileWatch;
 };
 
 bool inited = false;
 
 DomainState * domainState;
 
+#include "util_config.cpp"
+
+const char * configPath = "data/boeing.config";
+
+
 extern "C" void pumpXbDomainRoutine(){
     if(!inited || !domainState->inited) return;
 }
 
 
-extern "C" pumpMemsDomainRoutine(){
+extern "C" void pumpMemsDomainRoutine(){
     if(!inited || !domainState->inited) return;
-    
-    if(domainState->haltPolling){
-        domainState->pollHalted = true;
-        domainState->haltPolling = false;
-        while(domainState->pollHalted){}
-    }
     
     uint16 result = mpu6050_fifoCount(&domainState->memsHandle);
     
@@ -110,86 +108,184 @@ extern "C" pumpMemsDomainRoutine(){
     
 }
 
+
+static bool parseConfig(const char * line){
+    if(!strncmp("ip", line, 2)){
+        memset(domainState->ip, 0, 16);
+        memset(domainState->port, 0, 6);
+        return sscanf(line, "ip %16[^ ] %6[^ \r\n]", domainState->ip, domainState->port) == 2;
+    }else if(!strncmp("id", line, 2)){
+        return sscanf(line, "id %c[^ \r\n]", &domainState->id) == 1;
+    }else if(!strncmp("gyro", line, 4)){
+        return sscanf(line, "gyro %d[^\r\n ]", &domainState->memsHandle.settings.gyroPrecision) == 1;
+    }else if(!strncmp("acc", line, 3)){
+        return sscanf(line, "acc %d[^\r\n ]", &domainState->memsHandle.settings.accPrecision) == 1;
+    }else if(!strncmp("rate", line, 4)){
+        return sscanf(line, "rate %hu[^\r\n ]", &domainState->memsHandle.settings.sampleRate) == 1;
+    }
+    return true;
+}
+
+
 #define IMMEDIATE 0
 
 extern "C" void initDomainRoutine(void * memoryStart){
     
     initMemory(memoryStart);
     initNet();
+    initTime();
     
     domainState = (DomainState *) memoryStart;
+    wiringPiSetup();
     
-    domainState->haltPolling = true;
+    inited = true;
+    if(!domainState->inited){
+        bool result = true;
+        result &= watchFile(configPath, &domainState->configFileWatch);
+        ASSERT(result);
+        if(hasFileChanged(&domainState->configFileWatch)){
+            result &= loadConfig(configPath, parseConfig);
+        }else{
+            printf("failed to hotload config\n");
+            return;
+        }
+        
+        domainState->memsHandle.fd = wiringPiI2CSetup(0x68);
+        if(domainState->memsHandle.fd < 0){
+            printf("falied to open i2c handle\n");
+            return;
+        }
+        
+        printf("setting mems module, gyro: %d, acc %d, sample rate: %hu\n", domainState->memsHandle.settings.gyroPrecision, domainState->memsHandle.settings.accPrecision, domainState->memsHandle.settings.sampleRate);
+        
+        
+        
+        mpu6050_reset(&domainState->memsHandle);
+        mpu6050_setup(&domainState->memsHandle, domainState->memsHandle.settings);
+        printf("mpu6050 fifo size: %hhu\n", mpu6050_fifoCount(&domainState->memsHandle));
+        printf("mpu6050 pwr_mngmt1 %hhu\n", read8Reg(&domainState->memsHandle, MPU6050_REGISTER_PWR_MGMT_1));
+        domainState->head = 0;
+        domainState->tail = 0;
+        domainState->fifoCount = 0;
+        
+        
+        printf("setting up xb2 module\n");
+        
+        printf("opening handle\n");
+        if(!openHandle("/dev/ttyAMA0", &domainState->xb)){
+            printf("failed to open serial handle\n");
+            return;
+        }
+        printf("handle opened\n");
+        
+        domainState->xb.guardTime = 1.1f;
+        
+        printf("detecting baud rate\n");
+        if(!xbs2_detectAndSetStandardBaudRate(&domainState->xb)){
+            printf("failed to detect baud rate on xb\n");
+            closeHandle(&domainState->xb);
+            return;
+        }
+        printf("baud rate detected: %d\n", domainState->xb.baudrate);
+        printf("initing module\n");
+        if(!xbs2_initModule(&domainState->xb)){
+            printf("falied to init xb module\n");
+            closeHandle(&domainState->xb);
+            return;
+        }
+        printf("module inited, reading values\n");
+        
+        if (!xbs2_readValues(&domainState->xb)){
+            printf("failed to read module values");
+            closeHandle(&domainState->xb);
+            return;
+        }
+        
+        printf("values read, sid %9s\n", domainState->xb.sidLower);
+        
+        
+        
+        
 #if IMMEDIATE
 #else
-    
-    while(tcpConnect(&domainState->localSocket, "10.0.0.10", "25555") == false){
-        printf("failed to connect to server\n");
-        sleep(1);
-    }
-    //send settings and other info
-    NetSendSource namaste;
-    Message namasteMessage;
-    namasteMessage.type = MessageType_Init;
-    namasteMessage.init.clientType = ClientType_Boeing;
-    namaste.bufferLength = sizeof(namasteMessage.reserved) + sizeof(namasteMessage.init);
-    namasteMessage.init.boeing.name = '1';
-    namasteMessage.init.boeing.settings = domainState->memsHandle.settings;
-    namaste.buffer = (char*) &namasteMessage;
-    while(true){
-        NetResultType subRes = netSend(&domainState->localSocket, &namaste);
-        if(subRes == NetResultType_Ok || subRes == NetResultType_Closed){
-            
-            printf("init message sent\n");
-            
-            printf("getting xbs2 settings\n");
-            //accept christ blood and body in form of module settings
-            Message xbs2settings;
-            NetRecvResult result;
-            result.bufferLength = sizeof(Message);
-            result.buffer = (char *)&xbs2settings;
-            
-            NetResultType resultCode = netRecv(&domainState->localSocket, &result);
-            while(resultCode != NetResultType_Ok);
-            domainState->xbFreq = xbs2settings.init.beacon.frequency;
-            strncpy(domainState->channel, xbs2settings.init.beacon.channel, 3);
-            strncpy(domainState->pan, xbs2settings.init.beacon.pan, 5);
-            
-            //set the xbs
-            printf("got the settings, channel: %3s, pan: %5s\n", domainState->channel, domainState->pan);
-            printf("connecting to the xbs network\n");
-            
-            char channelMask[5];
-            if(!xbs2_getChannelMask(domainState->channel, channelMask)){
-                printf("ERROR, failed to determino channel mask\n");
-                *go = false;
-                break;
-            }
-            while(!xbs2_initNetwork(&domainState->xb, channelMask));
-            
-            
-            
-            printf("success, channel %s, pan %s\n", domainState->xb.channel, domainState->xb.pan);
-            break;
-            
-            
+        NetSocketSettings settings;
+        settings.blocking = true;
+        settings.reuseAddr = true;
+        
+        printf("opening socket\n");
+        if(!openSocket(&domainState->boeingSocket, &settings)){
+            printf("failed to open socket\n");
         }
-    }
+        
+        printf("connecting to server: %16s:%6s\n", domainState->ip, domainState->port);
+        if(tcpConnect(&domainState->boeingSocket, domainState->ip, domainState->port) == false){
+            printf("failed to connect to server\n");
+            return;
+        }
+        
+        
+        printf("sending namaste to the server\n");
+        //send settings and other info
+        NetSendSource namaste;
+        Message namasteMessage;
+        namasteMessage.type = MessageType_Init;
+        namasteMessage.init.clientType = ClientType_Boeing;
+        namaste.bufferLength = sizeof(namasteMessage.reserved) + sizeof(namasteMessage.init);
+        namasteMessage.init.boeing.name = domainState->id;
+        namasteMessage.init.boeing.settings = domainState->memsHandle.settings;
+        namaste.buffer = (char*) &namasteMessage;
+        while(true){
+            NetResultType subRes = netSend(&domainState->boeingSocket, &namaste);
+            if(subRes == NetResultType_Ok || subRes == NetResultType_Closed){
+                
+                printf("init message sent\n");
+                
+                printf("getting xbs2 settings\n");
+                //accept christ blood and body in form of module settings
+                Message xbs2settings;
+                NetRecvResult result;
+                result.bufferLength = sizeof(Message);
+                result.buffer = (char *)&xbs2settings;
+                
+                
+                
+                NetResultType resultCode = netRecv(&domainState->boeingSocket, &result);
+                while(resultCode != NetResultType_Ok);
+                
+                domainState->xbFreq = xbs2settings.init.beacon.frequency;
+                strncpy(domainState->channel, xbs2settings.init.beacon.channel, 3);
+                strncpy(domainState->pan, xbs2settings.init.beacon.pan, 5);
+                
+                
+                
+                //set the xbs
+                printf("got the settings, channel: %3s, pan: %5s\n", domainState->channel, domainState->pan);
+                printf("connecting to the xbs network\n");
+                
+                char channelMask[5];
+                if(!xbs2_getChannelMask(domainState->channel, channelMask)){
+                    printf("ERROR, failed to determino channel mask\n");
+                    return;
+                }
+                while(!xbs2_initNetwork(&domainState->xb, channelMask));
+                
+                
+                
+                printf("success, channel %s, pan %s\n", domainState->xb.channel, domainState->xb.pan);
+                break;
+                
+                
+            }
+        }
 #endif
-    
-    
-    
-    while(domainState->haltPolling){}
-    
-    
-    mpu6050_reset(&domainState->memsHandle);
-    mpu6050_setup(&domainState->memsHandle, domainState->memsHandle.settings);
-    printf("mpu6050 fifo size: %hhu\n", mpu6050_fifoCount(&domainState->memsHandle));
-    printf("mpu6050 pwr_mngmt1 %hhu\n", read8Reg(&domainState->memsHandle, MPU6050_REGISTER_PWR_MGMT_1));
-    domainState->head = 0;
-    domainState->tail = 0;
-    domainState->fifoCount = 0;
-    domainState->pollHalted = false;
+        
+        
+        
+        //todo reset fifo here
+        
+        domainState->inited = true;
+        
+    }
 }
 
 
@@ -201,181 +297,83 @@ extern "C" void processDomainRoutine(){
     if(!inited || !domainState->inited) return;
     
     
-    
-    NetSocketSettings settings;
-    settings.blocking = true;
-    settings.reuseAddr = true;
-    
-    
-    if(!openSocket(&domainState->localSocket, &settings)){
-        printf("falied to open local socket\n");
-        go &= false;
-        return;
-    }
-    
-    domainState->memsHandle.settings = {GyroPrecision_500, AccPrecision_4, 250};
-    domainState->haltPolling =  false;
-    domainState->pollHalted = false;
-    printf("opening handle\n");
-    if(!openHandle("/dev/ttyAMA0", &domainState->xb)){
-        printf("failed to open serial handle\n");
-        go &= false;
-        return;
-    }
-    printf("handle opened\n");
-    
-    printf("detecting baud rate\n");
-    if(!xbs2_detectAndSetStandardBaudRate(&domainState->xb)){
-        printf("failed to detect baud rate on xb\n");
-        closeHandle(&domainState->xb);
-        go &= false;
-        return;
-    }
-    printf("baud rate detected: %d\n", domainState->xb.baudrate);
-    printf("initing module\n");
-    if(!xbs2_initModule(&domainState->xb)){
-        printf("falied to init xb module\n");
-        closeHandle(&domainState->xb);
-        go &= false;
-        return;
-    }
-    printf("module inited, reading values\n");
-    
-    if (!xbs2_readValues(&domainState->xb)){
-        printf("failed to read module values");
-        closeHandle(&domainState->xb);
-        return;
-    }
-    
-    printf("values read, sid %9s\n", domainState->xb.sidLower);
-    
 #if IMMEDIATE
+    int8 xH = read8Reg(&domainState->memsHandle, MPU6050_REGISTER_ACCEL_XOUT_H);
+    int8 xL = read8Reg(&domainState->memsHandle, MPU6050_REGISTER_ACCEL_XOUT_L);
+    int16 resultX = ((uint16)xH) << 8 | xL;
+    
+    int8 yH = read8Reg(&domainState->memsHandle, MPU6050_REGISTER_ACCEL_YOUT_H);
+    int8 yL = read8Reg(&domainState->memsHandle, MPU6050_REGISTER_ACCEL_YOUT_L);
+    int16 resultY = ((uint16)yH) << 8 | yL;
+    
+    int8 zH = read8Reg(&domainState->memsHandle, MPU6050_REGISTER_ACCEL_ZOUT_H);
+    int8 zL = read8Reg(&domainState->memsHandle, MPU6050_REGISTER_ACCEL_ZOUT_L);
+    int16 resultZ = ((uint16)zH) << 8 | zL;
+    
+    printf("%hd %hd %hd\n", resultX, resultY, resultZ);
+    sleep(1);
+    
 #else
-    if(!createThread(&domainState->poller, (void (*)(void*)) pollModule, (void * ) &go)){
-        printf("failed to create thread\n");
-        go &= false;
-    }
-#endif
     
+    uint16 count = domainState->fifoCount;
     
-    Message header;
-    header.type = MessageType_Data;
+    ASSERT(count < ARRAYSIZE(domainState->fifoData));
     
-    char * sendData = &PUSHA(char, ARRAYSIZE(domainState->fifoData));
+    uint16 toRead = (count / 12) * 12;
     
-    connectToServer(&go);
-    
-    
-    while(go){
+    if(toRead > 12*10){
+        
+        uint16 size = ARRAYSIZE(domainState->fifoData);
+        uint16 tail = (domainState->tail + toRead) % size;
         
         
-#if IMMEDIATE
-        int8 xH = read8Reg(&domainState->memsHandle, MPU6050_REGISTER_ACCEL_XOUT_H);
-        int8 xL = read8Reg(&domainState->memsHandle, MPU6050_REGISTER_ACCEL_XOUT_L);
-        int16 resultX = ((uint16)xH) << 8 | xL;
         
-        int8 yH = read8Reg(&domainState->memsHandle, MPU6050_REGISTER_ACCEL_YOUT_H);
-        int8 yL = read8Reg(&domainState->memsHandle, MPU6050_REGISTER_ACCEL_YOUT_L);
-        int16 resultY = ((uint16)yH) << 8 | yL;
         
-        int8 zH = read8Reg(&domainState->memsHandle, MPU6050_REGISTER_ACCEL_ZOUT_H);
-        int8 zL = read8Reg(&domainState->memsHandle, MPU6050_REGISTER_ACCEL_ZOUT_L);
-        int16 resultZ = ((uint16)zH) << 8 | zL;
-        
-        printf("%hd %hd %hd\n", resultX, resultY, resultZ);
-        sleep(1);
-        
-#else
-        
-        uint16 count = domainState->fifoCount;
-        
-        ASSERT(count < ARRAYSIZE(domainState->fifoData));
-        
-        uint16 toRead = (count / 12) * 12;
-        
-        if(toRead > 12*10){
-            
-            uint16 size = ARRAYSIZE(domainState->fifoData);
-            uint16 tail = (domainState->tail + toRead) % size;
-            
-            
-            
-            
-            for(uint16 i = domainState->tail, j = 0; i != tail; i = (i+1) % size, j++)
-            {
-                sendData[j] = domainState->fifoData[i];
-            }
-            
-            
-            header.data.length = toRead;
-            NetSendSource source;
-            source.bufferLength = sizeof(Message);
-            source.buffer = (char*)&header;
-            
-            
-            
-            //printf("%hd %hd %hd\n", ((int16*)(domainState->fifoData+domainState->tail))[0], ((int16*)(domainState->fifoData+domainState->tail))[1], ((int16*)(domainState->fifoData+domainState->tail))[2]);
-            
-            NetResultType result;
-            bool cont = false;
-            while((result = netSend(&domainState->localSocket, &source)) != NetResultType_Ok){
-                printf("send error\n");
-                if(result == NetResultType_Closed){
-                    closeSocket(&domainState->localSocket);
-                    if(!openSocket(&domainState->localSocket, &settings)){
-                        printf("falied to open local socket\n");
-                        go &= false;
-                        return;
-                    }
-                    printf("socket closed, reconnecting \n");
-                    connectToServer(&go);
-                    cont = true;
-                    break;
-                }else{
-                    sleep(1);
-                }
-            }
-            
-            if(!cont){
-                
-                source.bufferLength = toRead;
-                source.buffer = sendData;
-                
-                while((result = netSend(&domainState->localSocket, &source)) != NetResultType_Ok){
-                    printf("send error\n");
-                    if(result == NetResultType_Closed){
-                        closeSocket(&domainState->localSocket);
-                        if(!openSocket(&domainState->localSocket, &settings)){
-                            printf("falied to open local socket\n");
-                            go &= false;
-                            return;
-                        }
-                        printf("socket closed, reconnecting \n");
-                        connectToServer(&go);
-                        cont = true;
-                        break;
-                    }else{
-                        sleep(1);
-                    }
-                }
-                
-                if(!cont){
-                    domainState->tail += toRead;
-                    domainState->tail %= ARRAYSIZE(domainState->fifoData);
-                    FETCH_AND_ADD(&domainState->fifoCount, -toRead);
-                }
-            }
+        for(uint16 i = domainState->tail, j = 0; i != tail; i = (i+1) % size, j++)
+        {
+            domainState->memsSendBuffer[j] = domainState->fifoData[i];
         }
         
         
+        Message header;
+        header.type = MessageType_Data;
+        header.data.length = toRead;
+        
+        NetSendSource source;
+        source.bufferLength = sizeof(Message);
+        source.buffer = (char*)&header;
         
         
-#endif
+        //printf("%hd %hd %hd\n", ((int16*)(domainState->fifoData+domainState->tail))[0], ((int16*)(domainState->fifoData+domainState->tail))[1], ((int16*)(domainState->fifoData+domainState->tail))[2]);
         
+        NetResultType result;
+        while((result = netSend(&domainState->boeingSocket, &source)) != NetResultType_Ok){
+            printf("send error\n");
+        }
+        
+        source.bufferLength = toRead;
+        source.buffer = domainState->memsSendBuffer;
+        
+        while((result = netSend(&domainState->boeingSocket, &source)) != NetResultType_Ok){
+            printf("send error\n");
+        }
+        
+        domainState->tail += toRead;
+        domainState->tail %= ARRAYSIZE(domainState->fifoData);
+        FETCH_AND_ADD(&domainState->fifoCount, -toRead);
         
     }
     
-    joinThread(&domainState->poller);
+    
+    
+    
+    
+#endif
+    
+    
+    
+    
+    
     
 }
 

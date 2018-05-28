@@ -202,6 +202,8 @@ extern "C" __declspec(dllexport) void initDomainRoutine(void * platformMemory){
         message.buffer = (char*)&handshake;
         message.bufferLength = sizeof(Message);
         
+        
+        
         if(netSend(&state->beaconsSocket, &message) != NetResultType_Ok){
             LOG("failed to send handshake message");
         }

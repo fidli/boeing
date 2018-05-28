@@ -94,6 +94,8 @@ void mpu6050_reset(MPU6050Handle * handle){
     }
 }
 
+
+
 void mpu6050_setup(MPU6050Handle * handle, const MPU6050Settings settings){
     
     //turn on power cycling for fifo settings
