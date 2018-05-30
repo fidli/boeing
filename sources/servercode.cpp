@@ -137,6 +137,34 @@ struct ProgramContext : Common{
 ProgramContext * programContext;
 bool inited = false;
 
+
+void resetBeacons(){
+    //programContext->beaconsAccumulatedSize = 0;
+}
+
+void resetModule(int index){
+    ProgramContext::Module * module = &programContext->modules[index];
+    module->tailIndex = 0;
+    module->headIndex = 0;
+    module->stepsAvailable = 0;
+    module->physicalFrame = 0;
+    
+    module->orientation = V3(0, 0, 0);
+    module->position = V3(0, 0, 0);
+    module->velocity = V3(0, 0, 0);
+    module->acceleration = V3(0, 0, 0);
+    
+    module->accelerationBiasLower = {};
+    module->accelerationBias = {};
+    module->accelerationBiasUpper = {};
+    
+    module->gyroBiasLower = {};
+    module->gyroBias = {};
+    module->gyroBiasUpper = {};
+    
+}
+
+
 extern "C" __declspec(dllexport) void boeingDomainRoutine(int index){
     if(!inited || !programContext->inited) return;
     NetRecvResult result;
@@ -152,6 +180,13 @@ extern "C" __declspec(dllexport) void boeingDomainRoutine(int index){
         if(resultCode == NetResultType_Ok){
             module->accumulatedSize += result.resultLength;
             if(module->accumulatedSize == sizeof(Message)){
+                
+                if(wrap.type == MessageType_Reset){
+                    resetModule(index);
+                    module->accumulatedSize = 0;
+                    return;
+                }
+                
                 ASSERT(wrap.data.length % sizeof(MemsData) == 0 && sizeof(MemsData) == 12);
                 
                 result.bufferLength = wrap.data.length; 
@@ -218,6 +253,10 @@ extern "C" __declspec(dllexport) void beaconsDomainRoutine(){
         if(resultCode == NetResultType_Ok){
             programContext->beaconsAccumulatedSize += result.resultLength;
             if(programContext->beaconsAccumulatedSize == sizeof(Message)){
+                if(message.type == MessageType_Reset){
+                    resetBeacons();
+                    return;
+                }
                 ASSERT(message.type == MessageType_Data);
                 //todo beacons processing
                 programContext->beaconsAccumulatedSize = 0;
@@ -230,32 +269,6 @@ extern "C" __declspec(dllexport) void beaconsDomainRoutine(){
     }
 }
 
-void resetBeacons(){
-    //programContext->beaconsAccumulatedSize = 0;
-}
-
-void resetModule(int index){
-    ProgramContext::Module * module = &programContext->modules[index];
-    module->tailIndex = 0;
-    module->headIndex = 0;
-    module->stepsAvailable = 0;
-    module->physicalFrame = 0;
-    //module->accumulatedSize = 0;
-    
-    module->orientation = V3(0, 0, 0);
-    module->position = V3(0, 0, 0);
-    module->velocity = V3(0, 0, 0);
-    module->acceleration = V3(0, 0, 0);
-    
-    module->accelerationBiasLower = {};
-    module->accelerationBias = {};
-    module->accelerationBiasUpper = {};
-    
-    module->gyroBiasLower = {};
-    module->gyroBias = {};
-    module->gyroBiasUpper = {};
-    
-}
 
 
 extern "C" __declspec(dllexport) void serverDomainRoutine(){
@@ -302,7 +315,6 @@ extern "C" __declspec(dllexport) void serverDomainRoutine(){
                     
                     module->name = wrap->init.boeing.name;
                     module->settings = wrap->init.boeing.settings;
-                    ASSERT(wrap->init.boeing.settings.sampleRate == 250);
                     
                     ProgramContext::Beacon * aBeacon = &programContext->beacons[0];
                     
@@ -420,7 +432,6 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
     if(hasFileChanged(&programContext->configFileWatch)){
         loadConfig(configPath, parseConfig);
     }
-    
     
     float32 dt = 0;
     const float32 g = mpu6050_g;

@@ -20,6 +20,9 @@ void wait(float32 seconds){
     while(aseqr(getProcessCurrentTime() - start, seconds, 0.00005f)){}
 }
 
+static int32 xbs2_sendByte(XBS2Handle * module, const char byteContents){
+    return writeSerial(module, &byteContents, 1);
+}
 
 
 static int32 xbs2_sendMessage(XBS2Handle * module, const char * buffer){
@@ -50,6 +53,10 @@ int32 waitForAnyMessage(XBS2Handle * module, char * responseBuffer, float32 time
         
     }
     return offset;
+}
+
+int32 waitForAnyByte(XBS2Handle * module, char * response, float32 timeout = -1){
+    return readSerial(module, response, 1, timeout);
 }
 
 
@@ -105,20 +112,27 @@ bool xbs2_detectAndSetStandardBaudRate(XBS2Handle * module){
     return false;
 }
 
+bool xbs2_transmitByte(XBS2Handle * source, const char byteContents){
+    return xbs2_sendByte(source, byteContents);
+}
 
-void xbs2_transmitMessage(XBS2Handle * source, const char * lowerAddress, const char * message){
+bool xbs2_changeAddress(XBS2Handle * source, const char * lowerAddress){
     char res[20];
-    
-    xbs2_enterCommandMode(source);
-    char buff[14];
-    sprintf(buff, "ATDL%8s\r", lowerAddress);
-    ASSERT(xbs2_sendMessage(source, buff));
-    
-    waitForAnyMessage(source, res);
-    xbs2_exitCommandMode(source);
-    
-    
-    ASSERT(xbs2_sendMessage(source, message));
+    if(xbs2_enterCommandMode(source)){
+        char buff[14];
+        sprintf(buff, "ATDL%8s\r", lowerAddress);
+        ASSERT(xbs2_sendMessage(source, buff));
+        waitForAnyMessage(source, res);
+        if(xbs2_exitCommandMode(source)){
+            return true;
+        }
+    }
+    return false;
+}
+
+
+bool xbs2_transmitMessage(XBS2Handle * source,  const char * message){
+    return xbs2_sendMessage(source, message);
 }
 
 bool xbs2_initNetwork(XBS2Handle * module, const char * channelMask = "1FFE"){
@@ -183,10 +197,9 @@ bool xbs2_initNetwork(XBS2Handle * module, const char * channelMask = "1FFE"){
                     module->frequency = 2480;
                 }
             }
-            
+            //-----GET
             // pan id
             success = success && xbs2_sendMessage(module, "ATID\r") && waitForAnyMessage(module, result) > 0 && sscanf(result, "%7[^\r]", module->pan) == 1;
-            
             
             xbs2_exitCommandMode(module);
         }else{
@@ -301,21 +314,22 @@ bool xbs2_initModule(XBS2Handle * module){
             //disable flow control flags
             success = success && xbs2_sendMessage(module, "ATD70\r") && waitForAnyMessage(module, result) > 0 && !strncmp("OK\r", result, 3);
             
-            //broadcast hops - max 1
+            /*
+            //broadcast hops = max 1
             success = success && xbs2_sendMessage(module, "ATBH0\r") && waitForAnyMessage(module, result) > 0 && !strncmp("OK\r", result, 3);
             
-            //broadcast destination address
-            success = success && xbs2_sendMessage(module, "ATDLFFFF\r") && waitForAnyMessage(module, result) > 0 && !strncmp("OK\r", result, 3);
             
-            //all modules have same high addressw set as destination address
-            success = success && xbs2_sendMessage(module, "ATSH\r") && waitForAnyMessage(module, result) > 0;
-            if(success){
-                char add[9];
-                char buff[14];
-                sscanf(result, "%9[^\r]", add);
-                sprintf(buff, "ATDH%8s\r", add);
-                success = success && xbs2_sendMessage(module, buff) && waitForAnyMessage(module, result) > 0 && !strncmp("OK\r", result, 3);
-            }
+            //broadcast destination address, SH is 0, which is default
+            success = success && xbs2_sendMessage(module, "ATDLFFFF\r") && waitForAnyMessage(module, result) > 0 && !strncmp("OK\r", result, 3);
+            */
+            
+            
+            
+            //destination high is constant, at least in this case
+            success = success && xbs2_sendMessage(module, "ATDH13A200\r") && waitForAnyMessage(module, result) > 0 && !strncmp("OK\r", result, 3);
+            
+            
+            
             
             /*
             //3ms guard time lesser is hardly achievable, sometimes it does not work

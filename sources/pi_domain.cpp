@@ -31,6 +31,10 @@ struct DomainState : Common{
     int16 tail;
     uint16 fifoCount;
     
+    bool haltMemsPolling;
+    bool memsPollingHalted;
+    bool xbPumpHalted;
+    
     char memsSendBuffer[4096];
     
     char id;
@@ -55,16 +59,74 @@ const char * configPath = "data/boeing.config";
 
 extern "C" void pumpXbDomainRoutine(){
     if(!inited || !domainState->inited) return;
+    
+    if(domainState->haltMemsPolling){
+        domainState->xbPumpHalted = true;
+        printf("xb pump halted\n");
+        while(domainState->haltMemsPolling){};
+        printf("xb pump unhalted\n");
+        domainState->xbPumpHalted = false;
+    }
+    
+    
+    //address is set to broadcast, just pump with constant pace
+    
+    float32 chunk = 1.0f / domainState->memsHandle.settings.sampleRate;
+    
+    wait(chunk);
+    bool result = xbs2_transmitByte(&domainState->xb, domainState->id);
+    ASSERT(result);
 }
 
+
+extern "C" void softResetBoeing(){
+    if(!inited || !domainState->inited) return;
+    
+    printf("soft reset inited\n");
+    
+    domainState->haltMemsPolling = true;
+    while(!domainState->memsPollingHalted){}
+    while(!domainState->xbPumpHalted){}
+    
+    NetSendSource reset;
+    Message resetMessage;
+    resetMessage.type = MessageType_Reset;
+    reset.bufferLength = sizeof(Message);
+    reset.buffer = (char*) &resetMessage;
+    while(netSend(&domainState->boeingSocket, &reset) != NetResultType_Ok){};
+    
+    
+    
+    domainState->head = 0;
+    domainState->tail = 0;
+    domainState->fifoCount = 0;
+    
+    
+    
+    mpu6050_resetFifo(&domainState->memsHandle);
+    
+    printf("soft reset finished\n");
+    
+    
+    domainState->haltMemsPolling = false;
+    
+};
 
 extern "C" void pumpMemsDomainRoutine(){
     if(!inited || !domainState->inited) return;
     
+    if(domainState->haltMemsPolling){
+        domainState->memsPollingHalted = true;
+        printf("mems pump halted\n");
+        while(domainState->haltMemsPolling){};
+        printf("mems pump unhalted\n");
+        domainState->memsPollingHalted = false;
+    }
+    
     uint16 result = mpu6050_fifoCount(&domainState->memsHandle);
     
     if(result >= 1024){
-        printf("overflow, fuk: result: %hu\n", result);
+        printf("overflow, this is not good: result: %hu\n", result);
         result = 1024;
     }
     
@@ -149,6 +211,9 @@ extern "C" void initDomainRoutine(void * memoryStart){
             printf("failed to hotload config\n");
             return;
         }
+        domainState->haltMemsPolling = false;
+        domainState->memsPollingHalted = false;
+        domainState->xbPumpHalted = false;
         
         domainState->memsHandle.fd = wiringPiI2CSetup(0x68);
         if(domainState->memsHandle.fd < 0){
@@ -280,12 +345,10 @@ extern "C" void initDomainRoutine(void * memoryStart){
 #endif
         
         
-        
-        //todo reset fifo here
-        
         domainState->inited = true;
-        
+        softResetBoeing();
     }
+    
 }
 
 
@@ -295,6 +358,7 @@ extern "C" void initDomainRoutine(void * memoryStart){
 
 extern "C" void processDomainRoutine(){
     if(!inited || !domainState->inited) return;
+    
     
     
 #if IMMEDIATE

@@ -15,6 +15,7 @@ enum ClientType{
 enum MessageType{
     MessageType_Invalid,
     MessageType_Init,
+    MessageType_Reset,
     MessageType_Data,
     
     MessageTypeCount

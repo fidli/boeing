@@ -50,10 +50,10 @@ uint8 read8Reg(MPU6050Handle * handle, int reg){
 
 #else
 void write8Reg(MPU6050Handle * handle, int reg, uint8 data){
-    ASSERT(!"SUKC MY DICK");
+    INV;
 }
 uint8 read8Reg(MPU6050Handle * handle, int reg){
-    ASSERT(!"SUKC MY DICK");
+    INV;
     return 0;
 }
 
@@ -79,6 +79,18 @@ uint8 read8Reg(MPU6050Handle * handle, int reg){
 #define MPU6050_REGISTER_ACCEL_ZOUT_H 0x3F
 #define MPU6050_REGISTER_ACCEL_ZOUT_L 0x40
 
+
+void mpu6050_resetFifo(MPU6050Handle * handle){
+    uint8 currentReg = read8Reg(handle, MPU6050_REGISTER_USER_CONTROL);
+    write8Reg(handle, MPU6050_REGISTER_USER_CONTROL, currentReg | 4);
+    uint8 reg;
+    while((reg = read8Reg(handle, MPU6050_REGISTER_USER_CONTROL)) != currentReg){
+#if DEBUG
+        printf("reseting device fifo  %hhu\n", reg);
+        sleep(1);
+#endif
+    }
+}
 
 //resets all the flags to default state
 void mpu6050_reset(MPU6050Handle * handle){

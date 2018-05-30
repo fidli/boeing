@@ -258,14 +258,14 @@ static void processPlatform(void *){
 
 void customWait(){
     context->freeze = true;
-    
+    print("froze \n");
     while(context->processRunning);
     while(context->boeingRunning[0]);
     while(context->boeingRunning[1]);
     while(context->serverRunning);
     while(context->beaconsRunning);
     
-    
+    print("wait ready\n");
     
 }
 
@@ -367,22 +367,22 @@ static inline int main(LPWSTR * argvW, int argc) {
                 OBTAINDLLFUNC(serverLibrary, initDomainRoutine);
                 OBTAINDLLFUNC(serverLibrary, processDomainRoutine);
                 OBTAINDLLFUNC(serverLibrary, renderDomainRoutine);
-            }
-            
-            if(serverLibrary == NULL){
-                beaconsDomainRoutine = NULL;
-                serverDomainRoutine = NULL;
-                boeingDomainRoutine = NULL;
-                initDomainRoutine = NULL;
-                processDomainRoutine = NULL;
-                renderDomainRoutine = NULL;
-            }else{
-                context->freeze = false;
-                if(initDomainRoutine){
-                    initDomainRoutine(domainMemory, &context->renderingTarget);
+                
+                
+                if(serverLibrary == NULL){
+                    beaconsDomainRoutine = NULL;
+                    serverDomainRoutine = NULL;
+                    boeingDomainRoutine = NULL;
+                    initDomainRoutine = NULL;
+                    processDomainRoutine = NULL;
+                    renderDomainRoutine = NULL;
+                }else{
+                    if(initDomainRoutine){
+                        initDomainRoutine(domainMemory, &context->renderingTarget);
+                    }
                 }
+                context->freeze = false;
             }
-            
             
             MSG msg;
             while(PeekMessage(&msg, context->window, 0, 0, PM_REMOVE))

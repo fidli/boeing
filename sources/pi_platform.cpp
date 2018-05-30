@@ -45,6 +45,7 @@ Context * context;
 DEFINEDLLFUNC(void, initDomainRoutine, void *);
 DEFINEDLLFUNC(void, processDomainRoutine, void);
 DEFINEDLLFUNC(void, pumpMemsDomainRoutine, void);
+DEFINEDLLFUNC(void, softResetBoeing, void);
 DEFINEDLLFUNC(void, pumpXbDomainRoutine, void);
 
 
@@ -75,9 +76,11 @@ static void pumpXbPlatform(void *){
 }
 
 void customWait(){
+    printf("froze\n");
     context->freeze = true;
     while(context->pumpXbRunning);
     while(context->pumpMemsRunning);
+    printf("wait over\n");
 }
 
 
@@ -122,19 +125,27 @@ int main(int argc, char ** argv) {
                     OBTAINDLLFUNC(domainLibrary, pumpMemsDomainRoutine);
                     OBTAINDLLFUNC(domainLibrary, initDomainRoutine);
                     OBTAINDLLFUNC(domainLibrary, processDomainRoutine);
-                    printf("dll changed ptrs %hhu, %hhu, %hhu, %hhu\n", pumpXbDomainRoutine != 0, pumpMemsDomainRoutine != 0, initDomainRoutine != 0, processDomainRoutine != 0);
-                }
-                
-                if(domainLibrary == NULL){
-                    pumpXbDomainRoutine = NULL;
-                    pumpMemsDomainRoutine = NULL;
-                    processDomainRoutine = NULL;
-                    initDomainRoutine = NULL;
-                }else{
-                    context->freeze = false;
-                    if(initDomainRoutine){
-                        initDomainRoutine(domainMemory);
+                    OBTAINDLLFUNC(domainLibrary, softResetBoeing);
+                    printf("dll changed ptrs %hhu, %hhu, %hhu, %hhu %hhu\n", pumpXbDomainRoutine != 0, pumpMemsDomainRoutine != 0, initDomainRoutine != 0, processDomainRoutine != 0, softResetBoeing != 0);
+                    
+                    
+                    if(domainLibrary == NULL){
+                        pumpXbDomainRoutine = NULL;
+                        pumpMemsDomainRoutine = NULL;
+                        processDomainRoutine = NULL;
+                        initDomainRoutine = NULL;
+                        softResetBoeing = NULL;
+                        context->freeze = false;
+                    }else{
+                        context->freeze = false;
+                        if(initDomainRoutine){
+                            initDomainRoutine(domainMemory);
+                        }
+                        if(softResetBoeing){
+                            softResetBoeing();
+                        }
                     }
+                    
                 }
                 
                 if(processDomainRoutine){

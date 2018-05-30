@@ -34,6 +34,8 @@ extern "C"{
 
 #include "common.h"
 
+#undef ASSERT
+#define ASSERT(expression)  if(!(expression)) {printf("ASSERT failed on line %d file %s\n", __LINE__, __FILE__); *(int *)0 = 0;}
 
 
 #include "util_mem.h"
@@ -57,8 +59,17 @@ char logbuffer[1024];
 
 struct State : Common{
     XBS2Handle * coordinator;
-    XBS2Handle serials[4];
+    
+    union{
+        struct{
+            XBS2Handle serial; //31 bytes
+            uint64 tick;
+        };
+        char alignment[64];
+    } beacons[4];
+    
     bool  inited;
+    
     FileWatchHandle configFileWatch;
     char coms[4][6];
     char coordinatorSid[9];
@@ -117,25 +128,30 @@ extern "C" __declspec(dllexport) void initDomainRoutine(void * platformMemory){
 #if 1
         LOG("initing network");
         for(uint8 serialIndex = 0; serialIndex < ARRAYSIZE(state->coms); serialIndex++){
-            XBS2Handle * beacon = &state->serials[serialIndex];
+            XBS2Handle * beacon = &state->beacons[serialIndex].serial;
             if(isHandleOpened(beacon)) continue;
             //this is actually windows specific, ignore for now
             LOG("opening handle");
             sprintf(path, "\\\\?\\%5s", state->coms[serialIndex]);
             LOG(path);
             if(openHandle(path, beacon)){
+                LOG("handle opened. detecting baudrate");
                 if(xbs2_detectAndSetStandardBaudRate(beacon)){
-                    if (!xbs2_initModule(beacon)){
+                    LOG("baudrate detected");
+                    LOG("initing module");
+                    while(!xbs2_initModule(beacon)){
                         LOG("failed to init module");
-                        closeHandle(beacon);
-                        return;
+                        wait(10);
+                        LOG("retrying");
                     }
-                    if (!xbs2_readValues(beacon)){
+                    LOG("reading values");
+                    while(!xbs2_readValues(beacon)){
                         LOG("failed to read module values");
-                        closeHandle(beacon);
-                        return;
+                        wait(10);
+                        LOG("retrying");
                     }
                     if(!strncmp(state->coordinatorSid, beacon->sidLower, 8)){
+                        LOG("this is coordinator");
                         state->coordinator = beacon;
                     }
                     LOG("handle opened and module inited");
@@ -160,7 +176,7 @@ extern "C" __declspec(dllexport) void initDomainRoutine(void * platformMemory){
         
         //reset network on others
         for(uint8 serialIndex = 0; serialIndex < ARRAYSIZE(state->coms); serialIndex++){
-            XBS2Handle * beacon = &state->serials[serialIndex];
+            XBS2Handle * beacon = &state->beacons[serialIndex].serial;
             if(beacon != state->coordinator){
                 LOG("joining network with");
                 LOG(beacon->sidLower);
@@ -217,6 +233,15 @@ extern "C" __declspec(dllexport) void initDomainRoutine(void * platformMemory){
 extern "C" __declspec(dllexport) void beaconDomainRoutine(int index){
     if(!inited || !state->inited) return;
     //poll the fuckers
+    uint64 oldTick = state->beacons[index].tick;
+    char response;
+    int32 size = waitForAnyByte(&state->beacons[index].serial, &response);
+    if(size > 0){
+        state->beacons[index].tick = getTick();
+        if(index == 0) printf("%lf\n", translateTickToTime((state->beacons[index].tick - oldTick))*1000);
+    }else{
+        //printf("[%d][%f] no response for 3 seconds\n", index, getProcessCurrentTime());
+    }
 }
 
 extern "C" __declspec(dllexport) void iterateDomainRoutine(){

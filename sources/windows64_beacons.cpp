@@ -44,6 +44,7 @@ extern "C"{
 
 #include "common.h"
 
+#include "util_string.cpp"
 
 
 #define PERSISTENT_MEM MEGABYTE(1)
@@ -125,10 +126,12 @@ static void beaconPlatform(int index){
 }
 
 void customWait(){
+    print("froze \n");
     context->freeze = true;
     for(uint8 i = 0; i < ARRAYSIZE(context->beaconThread); i++){
         while(context->beaconRunning[i]);
     }
+    print("wait ready\n");
 }
 
 
@@ -197,17 +200,18 @@ static inline int main(LPWSTR * argvW, int argc) {
                 OBTAINDLLFUNC(beaconsLibrary, initDomainRoutine);
                 OBTAINDLLFUNC(beaconsLibrary, iterateDomainRoutine);
                 
-            }
-            
-            if(beaconsLibrary == NULL){
-                initDomainRoutine = NULL;
-                iterateDomainRoutine = NULL;
-                beaconDomainRoutine = NULL;
-            }else{
-                context->freeze = false;
-                if(initDomainRoutine){
-                    initDomainRoutine(domainMemory);
+                
+                
+                if(beaconsLibrary == NULL){
+                    initDomainRoutine = NULL;
+                    iterateDomainRoutine = NULL;
+                    beaconDomainRoutine = NULL;
+                }else{
+                    if(initDomainRoutine){
+                        initDomainRoutine(domainMemory);
+                    }
                 }
+                context->freeze = false;
             }
             
             
