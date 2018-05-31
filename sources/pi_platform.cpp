@@ -121,6 +121,11 @@ int main(int argc, char ** argv) {
             while (context->common.keepRunning) {
                 
                 if(hasDllChangedAndReloaded(&domaincode, &domainLibrary, customWait)){
+                    pumpXbDomainRoutine = NULL;
+                    pumpMemsDomainRoutine = NULL;
+                    processDomainRoutine = NULL;
+                    initDomainRoutine = NULL;
+                    softResetBoeing = NULL;
                     OBTAINDLLFUNC(domainLibrary, pumpXbDomainRoutine);
                     OBTAINDLLFUNC(domainLibrary, pumpMemsDomainRoutine);
                     OBTAINDLLFUNC(domainLibrary, initDomainRoutine);

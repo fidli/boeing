@@ -15,6 +15,12 @@
 
 
 #include "common.h"
+
+#undef ASSERT
+#define ASSERT(expression)  if(!(expression)) {printf("ASSERT failed on line %d file %s\n", __LINE__, __FILE__); *(int *)0 = 0;}
+
+
+
 #include "util_mem.h"
 #include "util_math.cpp"
 #include "util_filesystem.h"
@@ -36,6 +42,8 @@ struct DomainState : Common{
     bool xbPumpHalted;
     
     char memsSendBuffer[4096];
+    
+    char beaconSids[4][9];
     
     char id;
     
@@ -73,9 +81,25 @@ extern "C" void pumpXbDomainRoutine(){
     
     float32 chunk = 1.0f / domainState->memsHandle.settings.sampleRate;
     
-    wait(chunk);
+    
+    wait(0.1f);
+    
+    //broadcast
     bool result = xbs2_transmitByte(&domainState->xb, domainState->id);
     ASSERT(result);
+    
+    
+    /* 
+//carousel 
+    for(uint8 i = 0; i < ARRAYSIZE(domainState->beaconSids); i++){
+        float32 start = getProcessCurrentTime();
+        bool result = xbs2_changeAddress(&domainState->xb, domainState->beaconSids[i]);
+        result = result && xbs2_transmitByte(&domainState->xb, domainState->id);
+        ASSERT(result);
+        printf("[%d] pump time taken: %f\n", i, getProcessCurrentTime() - start);
+    }
+    */
+    
 }
 
 
@@ -184,6 +208,8 @@ static bool parseConfig(const char * line){
         return sscanf(line, "acc %d[^\r\n ]", &domainState->memsHandle.settings.accPrecision) == 1;
     }else if(!strncmp("rate", line, 4)){
         return sscanf(line, "rate %hu[^\r\n ]", &domainState->memsHandle.settings.sampleRate) == 1;
+    }else if(!strncmp("beacons", line, 6)){
+        return sscanf(line, "beacons %8[^\r\n ] %8[^\r\n ] %8[^\r\n ] %8[^\r\n ]", domainState->beaconSids[0], domainState->beaconSids[1], domainState->beaconSids[2], domainState->beaconSids[3]) == 4;
     }
     return true;
 }
@@ -211,6 +237,11 @@ extern "C" void initDomainRoutine(void * memoryStart){
             printf("failed to hotload config\n");
             return;
         }
+        printf("beacon sids: ");
+        for(uint8 i = 0; i < ARRAYSIZE(domainState->beaconSids); i++){
+            printf("%s ", domainState->beaconSids[i]);
+        }
+        printf("\n");
         domainState->haltMemsPolling = false;
         domainState->memsPollingHalted = false;
         domainState->xbPumpHalted = false;

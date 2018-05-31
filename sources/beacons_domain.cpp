@@ -235,10 +235,12 @@ extern "C" __declspec(dllexport) void beaconDomainRoutine(int index){
     //poll the fuckers
     uint64 oldTick = state->beacons[index].tick;
     char response;
-    int32 size = waitForAnyByte(&state->beacons[index].serial, &response);
+    int32 size = waitForAnyByte(&state->beacons[index].serial, &response, 3);
+    static int round = 0;
     if(size > 0){
         state->beacons[index].tick = getTick();
-        if(index == 0) printf("%lf\n", translateTickToTime((state->beacons[index].tick - oldTick))*1000);
+        if(index == 2 && round % 10 == 0) printf("[%s][round %d] %lf\n", state->beacons[index].serial.sidLower, round, translateTickToTime((state->beacons[index].tick - oldTick))*1000);
+        round++;
     }else{
         //printf("[%d][%f] no response for 3 seconds\n", index, getProcessCurrentTime());
     }

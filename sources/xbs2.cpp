@@ -70,8 +70,9 @@ static bool xbs2_enterCommandMode(XBS2Handle * module){
     wait(module->guardTime);
     if(!xbs2_sendMessage(module, "+++")) return false;
     wait(module->guardTime);
+    float32 start = getProcessCurrentTime();
     waitForAnyMessage(module, result, 1.1f);
-    if(!strncmp("OK\r", result, 7)){
+    if(!strncmp("OK\r", result, 3)){
         return true;
     }
     return false;
@@ -82,7 +83,7 @@ static bool xbs2_exitCommandMode(XBS2Handle * module){
     char result[7] = {};
     if(!xbs2_sendMessage(module, "ATCN\r")) return false;
     waitForAnyMessage(module, result, 1.1f);
-    if(!strncmp("OK\r", result, 7)){
+    if(!strncmp("OK\r", result, 3)){
         return true;
     }
     return false;
@@ -126,6 +127,8 @@ bool xbs2_changeAddress(XBS2Handle * source, const char * lowerAddress){
         if(xbs2_exitCommandMode(source)){
             return true;
         }
+    }else{
+        ASSERT(false);
     }
     return false;
 }
@@ -149,7 +152,6 @@ bool xbs2_initNetwork(XBS2Handle * module, const char * channelMask = "1FFE"){
         //wait for network restart
         wait(2);
         if(success && xbs2_enterCommandMode(module)){
-            
             success = success && xbs2_sendMessage(module, "ATAI\r")  && waitForAnyMessage(module, result) > 0 && !strncmp("0\r", result, 2); 
             
             // operating channel
@@ -203,12 +205,14 @@ bool xbs2_initNetwork(XBS2Handle * module, const char * channelMask = "1FFE"){
             
             xbs2_exitCommandMode(module);
         }else{
+            
             if(!success) xbs2_exitCommandMode(module);
             return false;
         }
         
         return success;
     }else{
+        wait(10);
         return false;
     }
 }
@@ -314,22 +318,28 @@ bool xbs2_initModule(XBS2Handle * module){
             //disable flow control flags
             success = success && xbs2_sendMessage(module, "ATD70\r") && waitForAnyMessage(module, result) > 0 && !strncmp("OK\r", result, 3);
             
-            /*
+            //broadcast
             //broadcast hops = max 1
-            success = success && xbs2_sendMessage(module, "ATBH0\r") && waitForAnyMessage(module, result) > 0 && !strncmp("OK\r", result, 3);
+            success = success && xbs2_sendMessage(module, "ATBH1\r") && waitForAnyMessage(module, result) > 0 && !strncmp("OK\r", result, 3);
+            
+            //broadcast timeout = 0
+            success = success && xbs2_sendMessage(module, "ATAR0\r") && waitForAnyMessage(module, result) > 0 && !strncmp("OK\r", result, 3);
+            
+            
             
             
             //broadcast destination address, SH is 0, which is default
             success = success && xbs2_sendMessage(module, "ATDLFFFF\r") && waitForAnyMessage(module, result) > 0 && !strncmp("OK\r", result, 3);
-            */
             
             
+            //carousel/unicast
             
             //destination high is constant, at least in this case
             success = success && xbs2_sendMessage(module, "ATDH13A200\r") && waitForAnyMessage(module, result) > 0 && !strncmp("OK\r", result, 3);
             
             
-            
+            //unicast
+            success = success && xbs2_sendMessage(module, "ATDL400A3F4C\r") && waitForAnyMessage(module, result) > 0 && !strncmp("OK\r", result, 3);
             
             /*
             //3ms guard time lesser is hardly achievable, sometimes it does not work
@@ -337,8 +347,8 @@ bool xbs2_initModule(XBS2Handle * module){
             if(success) module->guardTime = 0.0031f;
             */
             
-            //100ms
-            success = success && xbs2_sendMessage(module, "ATGT064\r") && waitForAnyMessage(module, result) > 0 && !strncmp("OK\r", result, 1);
+            //100ms 64
+            success = success && xbs2_sendMessage(module, "ATGT64\r") && waitForAnyMessage(module, result) > 0 && !strncmp("OK\r", result, 1);
             if(success) module->guardTime = 0.110f;
             
             
