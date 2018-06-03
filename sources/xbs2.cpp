@@ -333,14 +333,14 @@ bool xbs2_initModule(XBS2Handle * module){
             
             
             //carousel/unicast
-            
+            /*
             //destination high is constant, at least in this case
             success = success && xbs2_sendMessage(module, "ATDH13A200\r") && waitForAnyMessage(module, result) > 0 && !strncmp("OK\r", result, 3);
             
             
             //unicast
             success = success && xbs2_sendMessage(module, "ATDL400A3F4C\r") && waitForAnyMessage(module, result) > 0 && !strncmp("OK\r", result, 3);
-            
+            */
             /*
             //3ms guard time lesser is hardly achievable, sometimes it does not work
             success = success && xbs2_sendMessage(module, "ATGT003\r") && waitForAnyMessage(module, result) > 0 && !strncmp("OK\r", result, 1);

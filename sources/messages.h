@@ -39,12 +39,14 @@ struct Message{
                     uint16 frequency;
                     char channel[3];
                     char pan[5];
+                    char sidLower[4][9];
                 } beacon;
             };
             
         } init;
         struct {
             uint32 length;
+            uint8 boeingId;
         } data;
     };
 };

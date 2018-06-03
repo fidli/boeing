@@ -102,6 +102,88 @@ extern "C" void pumpXbDomainRoutine(){
     
 }
 
+static bool connectToServer(){
+    
+    printf("connecting to server: %16s:%6s\n", domainState->ip, domainState->port);
+    if(tcpConnect(&domainState->boeingSocket, domainState->ip, domainState->port) == false){
+        printf("failed to connect to server\n");
+        return false;
+    }
+    
+    
+    printf("sending namaste to the server\n");
+    //send settings and other info
+    NetSendSource namaste;
+    Message namasteMessage;
+    namasteMessage.type = MessageType_Init;
+    namasteMessage.init.clientType = ClientType_Boeing;
+    namaste.bufferLength = sizeof(namasteMessage.reserved) + sizeof(namasteMessage.init);
+    namasteMessage.init.boeing.name = domainState->id;
+    namasteMessage.init.boeing.settings = domainState->memsHandle.settings;
+    namaste.buffer = (char*) &namasteMessage;
+    while(true){
+        NetResultType subRes = netSend(&domainState->boeingSocket, &namaste);
+        if(subRes == NetResultType_Ok || subRes == NetResultType_Closed){
+            
+            printf("init message sent\n");
+            
+            printf("getting xbs2 settings\n");
+            //accept christ blood and body in form of module settings
+            Message xbs2settings;
+            NetRecvResult result;
+            result.bufferLength = sizeof(Message);
+            result.buffer = (char *)&xbs2settings;
+            
+            
+            
+            NetResultType resultCode = netRecv(&domainState->boeingSocket, &result);
+            while(resultCode != NetResultType_Ok){
+                printf("fk\n");
+                sleep(1);
+            }
+            
+            domainState->xbFreq = xbs2settings.init.beacon.frequency;
+            strncpy(domainState->channel, xbs2settings.init.beacon.channel, 3);
+            strncpy(domainState->pan, xbs2settings.init.beacon.pan, 5);
+            
+            
+            
+            //set the xbs
+            printf("got the settings, channel: %3s, pan: %5s\n", domainState->channel, domainState->pan);
+            printf("connecting to the xbs network\n");
+            
+            char channelMask[5];
+            if(!xbs2_getChannelMask(domainState->channel, channelMask)){
+                printf("ERROR, failed to determino channel mask\n");
+                return false;
+            }
+            while(!xbs2_initNetwork(&domainState->xb, channelMask));
+            
+            
+            
+            printf("success, channel %s, pan %s\n", domainState->xb.channel, domainState->xb.pan);
+            break;
+            
+            
+        }
+    }
+    return true;
+}
+
+static void sendAndReconnect(const NetSendSource * source){
+    NetResultType result;
+    do{
+        result = netSend(&domainState->boeingSocket, source);
+        if(result == NetResultType_Closed || result == NetResultType_Timeout){
+            printf("send error, trying reconnect\n");
+            connectToServer();
+            printf("errno: %d\n", errno);
+            sleep(1);
+        }
+    }while(result != NetResultType_Ok);
+}
+
+
 
 extern "C" void softResetBoeing(){
     if(!inited || !domainState->inited) return;
@@ -117,7 +199,7 @@ extern "C" void softResetBoeing(){
     resetMessage.type = MessageType_Reset;
     reset.bufferLength = sizeof(Message);
     reset.buffer = (char*) &resetMessage;
-    while(netSend(&domainState->boeingSocket, &reset) != NetResultType_Ok){};
+    sendAndReconnect(&reset);
     
     
     
@@ -313,65 +395,8 @@ extern "C" void initDomainRoutine(void * memoryStart){
             printf("failed to open socket\n");
         }
         
-        printf("connecting to server: %16s:%6s\n", domainState->ip, domainState->port);
-        if(tcpConnect(&domainState->boeingSocket, domainState->ip, domainState->port) == false){
-            printf("failed to connect to server\n");
+        if(!connectToServer()){
             return;
-        }
-        
-        
-        printf("sending namaste to the server\n");
-        //send settings and other info
-        NetSendSource namaste;
-        Message namasteMessage;
-        namasteMessage.type = MessageType_Init;
-        namasteMessage.init.clientType = ClientType_Boeing;
-        namaste.bufferLength = sizeof(namasteMessage.reserved) + sizeof(namasteMessage.init);
-        namasteMessage.init.boeing.name = domainState->id;
-        namasteMessage.init.boeing.settings = domainState->memsHandle.settings;
-        namaste.buffer = (char*) &namasteMessage;
-        while(true){
-            NetResultType subRes = netSend(&domainState->boeingSocket, &namaste);
-            if(subRes == NetResultType_Ok || subRes == NetResultType_Closed){
-                
-                printf("init message sent\n");
-                
-                printf("getting xbs2 settings\n");
-                //accept christ blood and body in form of module settings
-                Message xbs2settings;
-                NetRecvResult result;
-                result.bufferLength = sizeof(Message);
-                result.buffer = (char *)&xbs2settings;
-                
-                
-                
-                NetResultType resultCode = netRecv(&domainState->boeingSocket, &result);
-                while(resultCode != NetResultType_Ok);
-                
-                domainState->xbFreq = xbs2settings.init.beacon.frequency;
-                strncpy(domainState->channel, xbs2settings.init.beacon.channel, 3);
-                strncpy(domainState->pan, xbs2settings.init.beacon.pan, 5);
-                
-                
-                
-                //set the xbs
-                printf("got the settings, channel: %3s, pan: %5s\n", domainState->channel, domainState->pan);
-                printf("connecting to the xbs network\n");
-                
-                char channelMask[5];
-                if(!xbs2_getChannelMask(domainState->channel, channelMask)){
-                    printf("ERROR, failed to determino channel mask\n");
-                    return;
-                }
-                while(!xbs2_initNetwork(&domainState->xb, channelMask));
-                
-                
-                
-                printf("success, channel %s, pan %s\n", domainState->xb.channel, domainState->xb.pan);
-                break;
-                
-                
-            }
         }
 #endif
         
@@ -441,17 +466,12 @@ extern "C" void processDomainRoutine(){
         
         //printf("%hd %hd %hd\n", ((int16*)(domainState->fifoData+domainState->tail))[0], ((int16*)(domainState->fifoData+domainState->tail))[1], ((int16*)(domainState->fifoData+domainState->tail))[2]);
         
-        NetResultType result;
-        while((result = netSend(&domainState->boeingSocket, &source)) != NetResultType_Ok){
-            printf("send error\n");
-        }
+        sendAndReconnect(&source);
         
         source.bufferLength = toRead;
         source.buffer = domainState->memsSendBuffer;
         
-        while((result = netSend(&domainState->boeingSocket, &source)) != NetResultType_Ok){
-            printf("send error\n");
-        }
+        sendAndReconnect(&source);
         
         domainState->tail += toRead;
         domainState->tail %= ARRAYSIZE(domainState->fifoData);

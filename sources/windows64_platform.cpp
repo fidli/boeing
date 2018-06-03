@@ -165,6 +165,10 @@ void updateCanvas(HDC dc, int x, int y, int width, int height){
     StretchDIBits(dc, x, y, width, height, 0, 0, width, height, context->renderer.drawbuffer, &context->renderer.drawinfo, DIB_RGB_COLORS, SRCCOPY);
 }
 
+#include "server_input.h"
+
+ServerInput input;
+
 LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam){
     switch(message)
     {
@@ -184,6 +188,26 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
             
             EndPaint(context->window, &paint);
         }
+        case WM_KEYUP:{
+            switch (wParam){
+                case 0x31:{ //'1'
+                    input.boeing1 = true;
+                }break;
+                case 0x32:{ //'2'
+                    input.boeing2 = true;
+                }break;
+                case VK_F1:{
+                    input.method1 = true;
+                }break;
+                case VK_F2:{
+                    input.method2 = true;
+                }break;
+                case VK_F3:{
+                    input.method3 = true;
+                }break;
+                
+            };
+        }break;
         break;
         case WM_CLOSE:
         case WM_DESTROY:
@@ -202,6 +226,7 @@ DEFINEDLLFUNC(void, boeingDomainRoutine,  int);
 DEFINEDLLFUNC(void, initDomainRoutine, void *, Image *);
 DEFINEDLLFUNC(void, processDomainRoutine, void);
 DEFINEDLLFUNC(void, renderDomainRoutine, void);
+DEFINEDLLFUNC(void, handleInputDomainRoutine, ServerInput *);
 
 
 
@@ -367,6 +392,7 @@ static inline int main(LPWSTR * argvW, int argc) {
                 OBTAINDLLFUNC(serverLibrary, initDomainRoutine);
                 OBTAINDLLFUNC(serverLibrary, processDomainRoutine);
                 OBTAINDLLFUNC(serverLibrary, renderDomainRoutine);
+                OBTAINDLLFUNC(serverLibrary, handleInputDomainRoutine);
                 
                 
                 if(serverLibrary == NULL){
@@ -376,6 +402,7 @@ static inline int main(LPWSTR * argvW, int argc) {
                     initDomainRoutine = NULL;
                     processDomainRoutine = NULL;
                     renderDomainRoutine = NULL;
+                    handleInputDomainRoutine = NULL;
                 }else{
                     if(initDomainRoutine){
                         initDomainRoutine(domainMemory, &context->renderingTarget);
@@ -384,6 +411,8 @@ static inline int main(LPWSTR * argvW, int argc) {
                 context->freeze = false;
             }
             
+            input = {};
+            
             MSG msg;
             while(PeekMessage(&msg, context->window, 0, 0, PM_REMOVE))
             {
@@ -391,6 +420,9 @@ static inline int main(LPWSTR * argvW, int argc) {
                 DispatchMessage(&msg);
             }
             
+            if(handleInputDomainRoutine){
+                handleInputDomainRoutine(&input);
+            }
             
             context->renderingTarget.info.width = context->renderer.width;
             context->renderingTarget.info.height = context->renderer.height;
