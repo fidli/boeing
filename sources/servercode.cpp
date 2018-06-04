@@ -138,6 +138,8 @@ struct ProgramContext : Common{
         char memsDataBuffer[4096];
         char xbDataBuffer[4096];
         
+        float32 xbPeriod;
+        
         Message lastMemsMessage;
         
         bool run;
@@ -153,6 +155,8 @@ struct ProgramContext : Common{
     } beacons[4];
     
     bool beaconsRun;
+    
+    bool record;
     
     Image * renderingTarget;
     float32 accumulator;
@@ -222,6 +226,10 @@ extern "C" __declspec(dllexport) void handleInputDomainRoutine(const ServerInput
     }
     if(input->method3){
         programContext->localisationType = LocalisationType_Both;
+    }
+    
+    if(input->record){
+        programContext->record = !programContext->record;
     }
 }
 
@@ -298,12 +306,15 @@ extern "C" __declspec(dllexport) void boeingDomainRoutine(int index){
             closeSocket(&programContext->boeingSocket[index]);
             module->run = false;
         }
+    }else{
+        Sleep(500);
     }
 }
 
 
 extern "C" __declspec(dllexport) void beaconsDomainRoutine(){
     if(!inited || !programContext->inited) return;
+    
     NetRecvResult result;
     result.bufferLength = sizeof(Message);
     Message * message = &programContext->lastBeaconsMessage;
@@ -361,6 +372,8 @@ extern "C" __declspec(dllexport) void beaconsDomainRoutine(){
             closeSocket(&programContext->beaconsSocket);
             programContext->beaconsRun = false;
         }
+    }else{
+        Sleep(500);
     }
 }
 
@@ -413,6 +426,7 @@ extern "C" __declspec(dllexport) void serverDomainRoutine(){
                     
                     module->name = wrap->init.boeing.name;
                     module->settings = wrap->init.boeing.settings;
+                    module->xbPeriod = wrap->init.boeing.xbPeriod;
                     
                     ProgramContext::Beacon * aBeacon = &programContext->beacons[0];
                     
@@ -592,7 +606,10 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
         }
         
         stepsAmount = MIN(stepsAmount, (uint16)(programContext->accumulator / dt));
-        
+        if(stepsAmount == 0){
+            Sleep(500);
+            return;
+        }
         const uint32 calibrationFrame = 100;
         const uint32 warmedUpFrame = 30;
         
@@ -729,7 +746,10 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
             }
         }
         
-        
+        if(stepsAmount == 0){
+            Sleep(500);
+            return;
+        }
         bool updateAcc = false;
         
         for(uint32 i = 0; i < ARRAYSIZE(programContext->modules); i++){
@@ -746,7 +766,7 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
                     if(maxTiming < programContext->accumulator){
                         
                         //do stuff?
-                        
+                        module->xbFrame++;
                         programContext->accumulator -= maxTiming;
                         module->xbTailIndex = (module->xbTailIndex + 1) % size;
                         FETCH_AND_ADD(&module->xbStepsAvailable, -1);
@@ -755,7 +775,7 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
                         FETCH_AND_ADD(&module->xbStepsAvailable, -1);
                         updateAcc = false;
                     }
-                    module->xbFrame++;
+                    
                 }
                 
             }
@@ -840,6 +860,11 @@ extern "C" __declspec(dllexport) void renderDomainRoutine(){
     //position - map frame
     {
         printToBitmap(programContext->renderingTarget, offset.x, offset.y - border, "TOP VIEW", &programContext->font, fontSize, white);
+        if(programContext->record){
+            printToBitmap(programContext->renderingTarget, offset.x + (strlen("TOP VIEW")+1) * fontSize, offset.y - border, "RECORDING", &programContext->font, fontSize, red);
+        }else{
+            printToBitmap(programContext->renderingTarget, offset.x + (strlen("TOP VIEW")+1) * fontSize, offset.y - border, "(not recording)", &programContext->font, fontSize, grey);
+        }
         dv2 bottomRightCorner = {(int32)programContext->renderingTarget->info.width - 3*border - textSize,(int32)programContext->renderingTarget->info.height - size - 3*border};
         drawRectangle(programContext->renderingTarget, &offset, &bottomRightCorner, white, thickness); 
         
@@ -933,14 +958,14 @@ extern "C" __declspec(dllexport) void renderDomainRoutine(){
         }
         
         printToBitmap(programContext->renderingTarget, offset.x, offset.y, buffer, &programContext->font, fontSize);
-        offset.y += border;
+        offset.y += fontSize*2;
         
         sprintf(buffer, "module: %1c", activeModule->name); 
         printToBitmap(programContext->renderingTarget, offset.x, offset.y, buffer, &programContext->font, fontSize);
         
         
         if(programContext->localisationType == LocalisationType_Xb || LocalisationType_Both){
-            offset.y += 2*border;
+            offset.y += 2*fontSize;
             sprintf(buffer, "xb frame: %u", activeModule->xbFrame); 
             printToBitmap(programContext->renderingTarget, offset.x, offset.y, buffer, &programContext->font, fontSize);
             offset.y += fontSize;
@@ -964,7 +989,7 @@ extern "C" __declspec(dllexport) void renderDomainRoutine(){
         
         
         {
-            offset.y += border;
+            offset.y += fontSize;
             sprintf(buffer, "position:"); 
             printToBitmap(programContext->renderingTarget, offset.x, offset.y, buffer, &programContext->font, fontSize);
             offset.y += fontSize;
@@ -985,11 +1010,10 @@ extern "C" __declspec(dllexport) void renderDomainRoutine(){
             offset.y += fontSize;
             offset.x -= border;
             
-            offset.y += border;
         }
         
         if(programContext->localisationType == LocalisationType_Xb || LocalisationType_Both){
-            offset.y += border;
+            offset.y += fontSize;
             sprintf(buffer, "latest time period:"); 
             printToBitmap(programContext->renderingTarget, offset.x, offset.y, buffer, &programContext->font, fontSize);
             offset.y += fontSize;

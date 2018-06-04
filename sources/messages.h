@@ -34,6 +34,7 @@ struct Message{
                 struct {
                     char name;
                     MPU6050Settings settings;
+                    float32 xbPeriod;
                 } boeing;
                 struct {
                     uint16 frequency;

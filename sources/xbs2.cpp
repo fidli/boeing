@@ -24,9 +24,17 @@ static int32 xbs2_sendByte(XBS2Handle * module, const char byteContents){
     return writeSerial(module, &byteContents, 1);
 }
 
+static void xbs2_sendByteQuick(XBS2Handle * module, const char byteContents){
+    writeSerialQuick(module, &byteContents, 1);
+}
+
 
 static int32 xbs2_sendMessage(XBS2Handle * module, const char * buffer){
     return writeSerial(module, buffer, strlen(buffer));
+}
+
+static void xbs2_sendMessageQuick(XBS2Handle * module, const char * buffer){
+    writeSerialQuick(module, buffer, strlen(buffer));
 }
 
 static void waitForMessage(XBS2Handle * module, char * responseBuffer, const char * message, float32 timeout = -1){
@@ -70,12 +78,17 @@ static bool xbs2_enterCommandMode(XBS2Handle * module){
     wait(module->guardTime);
     if(!xbs2_sendMessage(module, "+++")) return false;
     wait(module->guardTime);
-    float32 start = getProcessCurrentTime();
     waitForAnyMessage(module, result, 1.1f);
     if(!strncmp("OK\r", result, 3)){
         return true;
     }
     return false;
+}
+
+static void xbs2_enterCommandModeQuick(XBS2Handle * module){
+    wait(module->guardTime);
+    xbs2_sendMessageQuick(module, "+++");
+    wait(module->guardTime);
 }
 
 
@@ -89,11 +102,14 @@ static bool xbs2_exitCommandMode(XBS2Handle * module){
     return false;
 }
 
+static void xbs2_exitCommandModeQuick(XBS2Handle * module){
+    xbs2_sendMessageQuick(module, "ATCN\r");
+}
 
 bool xbs2_detectAndSetStandardBaudRate(XBS2Handle * module){
     module->guardTime = 1.1f;
     //sorted by default/popularity?
-    uint32 rates[] = {9600, 115200, 19200, 38400, 57600, 4800, 2400, 1200};
+    uint32 rates[] = {115200, 9600, 19200, 38400, 57600, 4800, 2400, 1200};
     for(uint8 rateIndex = 0; rateIndex < ARRAYSIZE(rates); rateIndex++){
         if(setBaudRate(module, rates[rateIndex])){
             if(clearSerialPort(module)){
@@ -117,20 +133,17 @@ bool xbs2_transmitByte(XBS2Handle * source, const char byteContents){
     return xbs2_sendByte(source, byteContents);
 }
 
-bool xbs2_changeAddress(XBS2Handle * source, const char * lowerAddress){
-    char res[20];
-    if(xbs2_enterCommandMode(source)){
-        char buff[14];
-        sprintf(buff, "ATDL%8s\r", lowerAddress);
-        ASSERT(xbs2_sendMessage(source, buff));
-        waitForAnyMessage(source, res);
-        if(xbs2_exitCommandMode(source)){
-            return true;
-        }
-    }else{
-        ASSERT(false);
-    }
-    return false;
+void xbs2_transmitByteQuick(XBS2Handle * source, const char byteContents){
+    xbs2_sendByteQuick(source, byteContents);
+}
+
+
+void xbs2_changeAddressQuick(XBS2Handle * source, const char * lowerAddress){
+    xbs2_enterCommandModeQuick(source);
+    char buff[14];
+    sprintf(buff, "ATDL%8s\r", lowerAddress);
+    xbs2_sendMessageQuick(source, buff);
+    xbs2_exitCommandModeQuick(source);
 }
 
 
@@ -202,7 +215,6 @@ bool xbs2_initNetwork(XBS2Handle * module, const char * channelMask = "1FFE"){
             //-----GET
             // pan id
             success = success && xbs2_sendMessage(module, "ATID\r") && waitForAnyMessage(module, result) > 0 && sscanf(result, "%7[^\r]", module->pan) == 1;
-            
             xbs2_exitCommandMode(module);
         }else{
             
@@ -295,11 +307,13 @@ bool xbs2_initModule(XBS2Handle * module){
         
         //reset factory defaults
         success = success && xbs2_sendMessage(module, "ATRE\r") && waitForAnyMessage(module, result) > 0 && !strncmp("OK\r", result, 3);
-        result[0] = 0;
+        
         
         //reset power
         success = success && xbs2_sendMessage(module, "ATFR\r") && waitForAnyMessage(module, result) > 0 && !strncmp("OK\r", result, 3);
-        result[0] = 0;
+        
+        module->baudrate = 9600;
+        success = success && setBaudRate(module, module->baudrate);
         
         if(success) wait(4); //after 2 seconds is reset, 2 seconds reserve
         
@@ -331,25 +345,42 @@ bool xbs2_initModule(XBS2Handle * module){
             //broadcast destination address, SH is 0, which is default
             success = success && xbs2_sendMessage(module, "ATDLFFFF\r") && waitForAnyMessage(module, result) > 0 && !strncmp("OK\r", result, 3);
             
+            /*
+                        //api addresing - cluster
+                        success = success && xbs2_sendMessage(module, "ATZA1\r") && waitForAnyMessage(module, result) > 0 && !strncmp("OK\r", result, 3);
+                        */
             
             //carousel/unicast
             /*
             //destination high is constant, at least in this case
             success = success && xbs2_sendMessage(module, "ATDH13A200\r") && waitForAnyMessage(module, result) > 0 && !strncmp("OK\r", result, 3);
             
-            
+            /*
             //unicast
             success = success && xbs2_sendMessage(module, "ATDL400A3F4C\r") && waitForAnyMessage(module, result) > 0 && !strncmp("OK\r", result, 3);
             */
+            
             /*
             //3ms guard time lesser is hardly achievable, sometimes it does not work
-            success = success && xbs2_sendMessage(module, "ATGT003\r") && waitForAnyMessage(module, result) > 0 && !strncmp("OK\r", result, 1);
+            success = success && xbs2_sendMessage(module, "ATGT003\r") && waitForAnyMessage(module, result) > 0 && !strncmp("OK\r", result, 3);
             if(success) module->guardTime = 0.0031f;
             */
             
+            
             //100ms 64
-            success = success && xbs2_sendMessage(module, "ATGT64\r") && waitForAnyMessage(module, result) > 0 && !strncmp("OK\r", result, 1);
+            success = success && xbs2_sendMessage(module, "ATGT64\r") && waitForAnyMessage(module, result) > 0 && !strncmp("OK\r", result, 3);
             if(success) module->guardTime = 0.110f;
+            //baud rate 115200
+            
+            success = success && xbs2_sendMessage(module, "ATBD7\r") && waitForAnyMessage(module, result) > 0 && !strncmp("OK\r", result, 3);
+            if(success)
+            {
+                module->baudrate = 115200;
+                xbs2_exitCommandMode(module);
+                success = success && setBaudRate(module, module->baudrate);
+                return success;
+            }
+            
             
             
         }

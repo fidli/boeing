@@ -205,6 +205,9 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
                 case VK_F3:{
                     input.method3 = true;
                 }break;
+                case 0x52:{ //'r'
+                    input.record = true;
+                }break;
                 
             };
         }break;
@@ -380,10 +383,14 @@ static inline int main(LPWSTR * argvW, int argc) {
     
     if(initSuccess && watchSuccess  && socketResult && threadResult && windowCreated && registerWindow && argvSuccess && privileges && memory){
         
+        
+        
         ShowWindow(context->window, SW_SHOWMAXIMIZED);
         
         
         while (context->common.keepRunning) {
+            
+            float32 frameStartTime = getProcessCurrentTime();
             
             if(hasDllChangedAndReloaded(&servercode, &serverLibrary, customWait)){
                 OBTAINDLLFUNC(serverLibrary, beaconsDomainRoutine);
@@ -433,7 +440,12 @@ static inline int main(LPWSTR * argvW, int argc) {
             if(renderDomainRoutine != NULL){
                 renderDomainRoutine();
             }
-            
+            float32 endFrameTime = getProcessCurrentTime();
+            float32 timeTaken = endFrameTime-frameStartTime;
+            //30 fps
+            if(timeTaken < 0.033f){
+                Sleep(1000*(DWORD)(0.033f - timeTaken));
+            }
             InvalidateRect(context->window, NULL, TRUE);
             
             

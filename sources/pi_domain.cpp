@@ -53,6 +53,8 @@ struct DomainState : Common{
     char pan[5];
     bool inited;
     
+    float32 xbPeriod;
+    
     FileWatchHandle configFileWatch;
 };
 
@@ -79,26 +81,25 @@ extern "C" void pumpXbDomainRoutine(){
     
     //address is set to broadcast, just pump with constant pace
     
-    float32 chunk = 1.0f / domainState->memsHandle.settings.sampleRate;
-    
-    
-    wait(0.1f);
-    
-    //broadcast
+    //wait(0.1f);
+    /*
+    //multicast
     bool result = xbs2_transmitByte(&domainState->xb, domainState->id);
     ASSERT(result);
-    
-    
-    /* 
-//carousel 
-    for(uint8 i = 0; i < ARRAYSIZE(domainState->beaconSids); i++){
-        float32 start = getProcessCurrentTime();
-        bool result = xbs2_changeAddress(&domainState->xb, domainState->beaconSids[i]);
-        result = result && xbs2_transmitByte(&domainState->xb, domainState->id);
-        ASSERT(result);
-        printf("[%d] pump time taken: %f\n", i, getProcessCurrentTime() - start);
-    }
     */
+    
+    wait(domainState->xbPeriod);
+    xbs2_transmitByteQuick(&domainState->xb, domainState->id);
+    
+    /*
+    //carousel 
+    for(uint8 i = 0; i < ARRAYSIZE(domainState->beaconSids); i++){
+        //float32 start = getProcessCurrentTime();
+        xbs2_changeAddressQuick(&domainState->xb, domainState->beaconSids[i]);
+        //printf("[%d] change address time taken: %f\n", i, getProcessCurrentTime() - start);
+        xbs2_transmitByteQuick(&domainState->xb, domainState->id);
+    }*/
+    
     
 }
 
@@ -117,6 +118,7 @@ static bool connectToServer(){
     Message namasteMessage;
     namasteMessage.type = MessageType_Init;
     namasteMessage.init.clientType = ClientType_Boeing;
+    namasteMessage.init.boeing.xbPeriod = domainState->xbPeriod;
     namaste.bufferLength = sizeof(namasteMessage.reserved) + sizeof(namasteMessage.init);
     namasteMessage.init.boeing.name = domainState->id;
     namasteMessage.init.boeing.settings = domainState->memsHandle.settings;
@@ -288,8 +290,15 @@ static bool parseConfig(const char * line){
         return sscanf(line, "gyro %d[^\r\n ]", &domainState->memsHandle.settings.gyroPrecision) == 1;
     }else if(!strncmp("acc", line, 3)){
         return sscanf(line, "acc %d[^\r\n ]", &domainState->memsHandle.settings.accPrecision) == 1;
-    }else if(!strncmp("rate", line, 4)){
-        return sscanf(line, "rate %hu[^\r\n ]", &domainState->memsHandle.settings.sampleRate) == 1;
+    }else if(!strncmp("memsrate", line, 8)){
+        return sscanf(line, "memsrate %hu[^\r\n ]", &domainState->memsHandle.settings.sampleRate) == 1;
+    }else if(!strncmp("xbrate", line, 6)){
+        float32 rate;
+        if(sscanf(line, "xbrate %hu[^\r\n ]", &rate) == 1){
+            domainState->xbPeriod = 1.0f/rate;
+            return true;
+        }
+        return false;
     }else if(!strncmp("beacons", line, 6)){
         return sscanf(line, "beacons %8[^\r\n ] %8[^\r\n ] %8[^\r\n ] %8[^\r\n ]", domainState->beaconSids[0], domainState->beaconSids[1], domainState->beaconSids[2], domainState->beaconSids[3]) == 4;
     }

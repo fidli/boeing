@@ -182,6 +182,7 @@ extern "C" __declspec(dllexport) void initDomainRoutine(void * platformMemory){
                 LOG("handle opened. detecting baudrate");
                 if(xbs2_detectAndSetStandardBaudRate(beacon)){
                     LOG("baudrate detected");
+                    printf("%u\n", beacon->baudrate);
                     LOG("initing module");
                     while(!xbs2_initModule(beacon)){
                         LOG("failed to init module");
@@ -265,8 +266,8 @@ extern "C" __declspec(dllexport) void beaconDomainRoutine(int index){
         state->beacons[index].fifoData[moduleId][state->beacons[index].head[moduleId]] = res;
         state->beacons[index].head[moduleId] = (state->beacons[index].head[moduleId]+1) % ARRAYSIZE(state->beacons[index].fifoData[moduleId]);
         FETCH_AND_ADD(&state->beacons[index].fifoCount[moduleId], 1);
-        //if(index == 2 && round % 10 == 0) printf("[%s][round %d] %lf\n", state->beacons[index].serial.sidLower, round, translateTickToTime((state->beacons[index].tick - oldTick))*1000);
-        
+        printf("[%8s] %lf\n", state->beacons[index].serial.sidLower, res);
+        //xbs2_readLatestReceiveInfo(&state->beacons[index].serial);
     }else{
         //printf("[%d][%f] no response for 3 seconds\n", index, getProcessCurrentTime());
     }
