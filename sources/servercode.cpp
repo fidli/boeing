@@ -119,7 +119,7 @@ struct ProgramContext : Common{
         int32 memsHeadIndex;
         uint32 memsStepsAvailable;
         
-        XbData xbData[1000];
+        XbData xbData[2000];
         int32 xbTailIndex;
         int32 xbHeadIndex;
         uint32 xbStepsAvailable;
@@ -440,11 +440,12 @@ extern "C" __declspec(dllexport) void serverDomainRoutine(){
                         uint8 targetIndex = 0;
                         for(; targetIndex < ARRAYSIZE(programContext->beacons); targetIndex++){
                             if(!strncmp(wrap->init.beacon.sidLower[sourceIndex], programContext->beacons[targetIndex].sidLower, 8)){
+                                //it should land on source index
                                 if(sourceIndex != targetIndex){
                                     //swap
                                     v3 tempPosition = programContext->beacons[sourceIndex].position;
                                     programContext->beacons[sourceIndex].position = programContext->beacons[targetIndex].position;
-                                    programContext->beacons[targetIndex].position = programContext->beacons[sourceIndex].position;
+                                    programContext->beacons[targetIndex].position = tempPosition;
                                     
                                     //swap one sided, the sid is getting written later
                                     strncpy(programContext->beacons[targetIndex].sidLower, programContext->beacons[sourceIndex].sidLower, 9);
@@ -788,7 +789,7 @@ extern "C" __declspec(dllexport) void renderDomainRoutine(){
     ProgramContext::Module * activeModule = &programContext->modules[programContext->activeModuleIndex];
     
     int32 size = programContext->renderingTarget->info.width / 6;
-    int32 border = (int32)(0.1f * (float32)size);
+    int32 border = (int32)(0.12f * (float32)size);
     
     size = size - border;
     uint8 thickness = 1;
@@ -834,11 +835,84 @@ extern "C" __declspec(dllexport) void renderDomainRoutine(){
     
     dv2 offset = {border, border};
     
-    //position
+    uint8 fontSize = 14;
+    
+    //position - map frame
     {
-        printToBitmap(programContext->renderingTarget, offset.x, offset.y - border, "TOP VIEW", &programContext->font, border, white);
+        printToBitmap(programContext->renderingTarget, offset.x, offset.y - border, "TOP VIEW", &programContext->font, fontSize, white);
         dv2 bottomRightCorner = {(int32)programContext->renderingTarget->info.width - 3*border - textSize,(int32)programContext->renderingTarget->info.height - size - 3*border};
         drawRectangle(programContext->renderingTarget, &offset, &bottomRightCorner, white, thickness); 
+        
+        uint8 axisFontSize = fontSize;
+        printToBitmap(programContext->renderingTarget, offset.x, bottomRightCorner.y, "X", &programContext->font, axisFontSize, blue);
+        printToBitmap(programContext->renderingTarget, offset.x - border, offset.y, " Y", &programContext->font, axisFontSize, blue);
+        
+        
+        float32 maxX = 0;
+        float32 maxY = 0;
+        for(uint8 beaconIndex = 0; beaconIndex < ARRAYSIZE(programContext->beacons); beaconIndex++){
+            maxX = MAX(maxX, ABS(programContext->beacons[beaconIndex].position.x));
+            maxY = MAX(maxY, ABS(programContext->beacons[beaconIndex].position.y));
+        }
+        for(uint8 moduleIndex = 0; moduleIndex < ARRAYSIZE(programContext->modules); moduleIndex++){
+            if(programContext->modules[moduleIndex].run){
+                maxX = MAX(maxX, ABS(programContext->modules[moduleIndex].position.x));
+                maxY = MAX(maxY, ABS(programContext->modules[moduleIndex].position.y));
+            }
+        }
+        float32 scaleX = ((bottomRightCorner.x - offset.x - 2*border)/2)/maxX;
+        float32 scaleY = ((bottomRightCorner.y - offset.y - 2*border)/2)/maxY;
+        
+        
+        dv2 frameCenter = {(bottomRightCorner.x + offset.x)/2, (bottomRightCorner.y + offset.y)/2};
+        
+        dv2 a;
+        dv2 b;
+        a.y = offset.y;
+        b.y = bottomRightCorner.y;
+        for(int32 meter = (int32)-maxX; meter <= maxX; meter++){
+            a.x = b.x = (int32)(meter*scaleX) + frameCenter.x;
+            
+            drawLine(programContext->renderingTarget, &a, &b, grey, 1);
+            char name[4] = {};
+            sprintf(name, "%+d", meter);
+            printToBitmap(programContext->renderingTarget, a.x, bottomRightCorner.y, name, &programContext->font, axisFontSize, grey);
+        }
+        
+        a.x = offset.x;
+        b.x = bottomRightCorner.x;
+        for(int32 meter = (int32)-maxY; meter <= maxY; meter++){
+            a.y = b.y = (int32)(-meter*scaleY) + frameCenter.y;
+            
+            drawLine(programContext->renderingTarget, &a, &b, grey, 1);
+            char name[4] = {};
+            sprintf(name, "%+d", meter);
+            printToBitmap(programContext->renderingTarget, 0, a.y - axisFontSize/2, name, &programContext->font, axisFontSize, grey);
+        }
+        
+        
+        dv2 pos;
+        for(uint8 beaconIndex = 0; beaconIndex < ARRAYSIZE(programContext->beacons); beaconIndex++){
+            pos.x = (int32)(scaleX * programContext->beacons[beaconIndex].position.x);
+            pos.y = (int32)(scaleY * -programContext->beacons[beaconIndex].position.y);
+            pos = pos + frameCenter;
+            drawCircle(programContext->renderingTarget, &pos, 10, blue, 1);
+            pos = pos + DV2(-10, 10);
+            printToBitmap(programContext->renderingTarget, pos.x, pos.y, programContext->beacons[beaconIndex].sidLower + 5, &programContext->font, 12, white);
+        }
+        
+        for(uint8 moduleIndex = 0; moduleIndex < ARRAYSIZE(programContext->modules); moduleIndex++){
+            if(programContext->modules[moduleIndex].run){
+                pos.x = (int32)(scaleX * programContext->modules[moduleIndex].position.x);
+                pos.y = (int32)(scaleY * -programContext->modules[moduleIndex].position.y);
+                pos = pos + frameCenter;
+                drawCircle(programContext->renderingTarget, &pos, 20, red, 1);
+                pos = pos + DV2(-5, -12);
+                char name[2] = {programContext->modules[moduleIndex].name};
+                printToBitmap(programContext->renderingTarget, pos.x, pos.y, name, &programContext->font, 20, white);
+            }
+        }
+        
         offset.x = bottomRightCorner.x + border;
         offset.y = 0;
     }
@@ -847,7 +921,6 @@ extern "C" __declspec(dllexport) void renderDomainRoutine(){
         
         //textual info
         char buffer[122];
-        uint16 fontSize = border*3/4;
         
         if(programContext->localisationType == LocalisationType_Mems){
             sprintf(buffer, "method: mems");
@@ -1016,7 +1089,7 @@ extern "C" __declspec(dllexport) void renderDomainRoutine(){
         
         //orientation pitch
         {
-            printToBitmap(programContext->renderingTarget, offset.x, offset.y -border, "PITCH", &programContext->font, border, blue);
+            printToBitmap(programContext->renderingTarget, offset.x, offset.y -border, "PITCH", &programContext->font, fontSize, blue);
             
             //static shit
             dv2 bottomLeftCorner = {offset.x, offset.y + size};
@@ -1104,7 +1177,7 @@ extern "C" __declspec(dllexport) void renderDomainRoutine(){
         
         //orientation roll
         {
-            printToBitmap(programContext->renderingTarget, offset.x, offset.y -border, "ROLL", &programContext->font, border, blue);
+            printToBitmap(programContext->renderingTarget, offset.x, offset.y -border, "ROLL", &programContext->font, fontSize, blue);
             //static shit
             dv2 bottomLeftCorner = {offset.x, offset.y + size};
             dv2 bottomRightCorner = {offset.x + size, offset.y + size};
@@ -1185,7 +1258,7 @@ extern "C" __declspec(dllexport) void renderDomainRoutine(){
         
         //orientation yaw
         {
-            printToBitmap(programContext->renderingTarget, offset.x, offset.y -border, "YAW", &programContext->font, border, blue);
+            printToBitmap(programContext->renderingTarget, offset.x, offset.y -border, "YAW", &programContext->font, fontSize, blue);
             //static shit
             dv2 topLeftCorner = {offset.x, offset.y};
             dv2 bottomRightCorner = {offset.x + size, offset.y + size};
@@ -1255,7 +1328,7 @@ extern "C" __declspec(dllexport) void renderDomainRoutine(){
         //acc yaw  if not zero, check for it
         v2 topDownAcc = V2(accY, accX);
         {
-            printToBitmap(programContext->renderingTarget, offset.x, offset.y -border, "ACC YAW", &programContext->font, border, red);
+            printToBitmap(programContext->renderingTarget, offset.x, offset.y -border, "ACC YAW", &programContext->font, fontSize, red);
             //static shit
             dv2 topLeftCorner = {offset.x, offset.y};
             dv2 bottomRightCorner = {offset.x + size, offset.y + size};
@@ -1314,7 +1387,7 @@ extern "C" __declspec(dllexport) void renderDomainRoutine(){
         //acc pitch if not zero, check for it
         v2 sideAcc = V2(accX, accZ);
         {
-            printToBitmap(programContext->renderingTarget, offset.x, offset.y -border, "ACC PITCH", &programContext->font, border, red);
+            printToBitmap(programContext->renderingTarget, offset.x, offset.y -border, "ACC PITCH", &programContext->font, fontSize, red);
             
             //static shit
             dv2 bottomLeftCorner = {offset.x, offset.y + size};
@@ -1399,7 +1472,7 @@ extern "C" __declspec(dllexport) void renderDomainRoutine(){
         
         //acc size
         {
-            printToBitmap(programContext->renderingTarget, offset.x, offset.y -border, "ACC SIZE", &programContext->font, border, red);
+            printToBitmap(programContext->renderingTarget, offset.x, offset.y -border, "ACC SIZE", &programContext->font, fontSize, red);
             offset.x += sizeHalf/2;
             
             //static shit
