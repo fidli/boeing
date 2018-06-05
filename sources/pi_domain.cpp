@@ -294,7 +294,7 @@ static bool parseConfig(const char * line){
         return sscanf(line, "memsrate %hu[^\r\n ]", &domainState->memsHandle.settings.sampleRate) == 1;
     }else if(!strncmp("xbrate", line, 6)){
         float32 rate;
-        if(sscanf(line, "xbrate %hu[^\r\n ]", &rate) == 1){
+        if(sscanf(line, "xbrate %f[^\r\n ]", &rate) == 1){
             domainState->xbPeriod = 1.0f/rate;
             return true;
         }
@@ -344,7 +344,7 @@ extern "C" void initDomainRoutine(void * memoryStart){
         }
         
         printf("setting mems module, gyro: %d, acc %d, sample rate: %hu\n", domainState->memsHandle.settings.gyroPrecision, domainState->memsHandle.settings.accPrecision, domainState->memsHandle.settings.sampleRate);
-        
+        printf("xb time period %f\n", domainState->xbPeriod);
         
         
         mpu6050_reset(&domainState->memsHandle);

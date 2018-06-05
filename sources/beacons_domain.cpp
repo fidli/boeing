@@ -69,7 +69,7 @@ struct State : Common{
         uint16 fifoCount[2];
     } beacons[4];
     
-    char sendBuffer[4096];
+    char sendBuffer[60000];
     
     bool  inited;
     
@@ -266,7 +266,7 @@ extern "C" __declspec(dllexport) void beaconDomainRoutine(int index){
         state->beacons[index].fifoData[moduleId][state->beacons[index].head[moduleId]] = res;
         state->beacons[index].head[moduleId] = (state->beacons[index].head[moduleId]+1) % ARRAYSIZE(state->beacons[index].fifoData[moduleId]);
         FETCH_AND_ADD(&state->beacons[index].fifoCount[moduleId], 1);
-        printf("[%8s] %lf\n", state->beacons[index].serial.sidLower, res);
+        //printf("[%8s] %lf\n", state->beacons[index].serial.sidLower, res);
         //xbs2_readLatestReceiveInfo(&state->beacons[index].serial);
     }else{
         //printf("[%d][%f] no response for 3 seconds\n", index, getProcessCurrentTime());

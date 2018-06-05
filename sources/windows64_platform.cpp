@@ -47,7 +47,7 @@ extern "C"{
 
 #define PERSISTENT_MEM MEGABYTE(1)
 #define TEMP_MEM MEGABYTE(1)
-#define STACK_MEM MEGABYTE(1+100+100+1)
+#define STACK_MEM MEGABYTE(1+700+1)
 
 #include "windows_time.cpp"
 
@@ -226,7 +226,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
 DEFINEDLLFUNC(void, beaconsDomainRoutine, void);
 DEFINEDLLFUNC(void, serverDomainRoutine,  void);
 DEFINEDLLFUNC(void, boeingDomainRoutine,  int);
-DEFINEDLLFUNC(void, initDomainRoutine, void *, Image *);
+DEFINEDLLFUNC(void, initDomainRoutine, void *, Image *, char*);
 DEFINEDLLFUNC(void, processDomainRoutine, void);
 DEFINEDLLFUNC(void, renderDomainRoutine, void);
 DEFINEDLLFUNC(void, handleInputDomainRoutine, ServerInput *);
@@ -312,7 +312,7 @@ static inline int main(LPWSTR * argvW, int argc) {
     context->common.keepRunning = true;
     context->renderer.drawBitmapData = {};
     
-    PPUSHA(char, MEGABYTE(201));
+    PPUSHA(char, MEGABYTE(700));
     void * domainMemory = (void*)&context->common;
     
     
@@ -373,7 +373,10 @@ static inline int main(LPWSTR * argvW, int argc) {
     
     bool initSuccess = initIo() && initTime() && initNet();
     
-    
+    char * file = NULL;
+    if(argc >= 2){
+        file = argv[1];
+    }
     
     HMODULE serverLibrary = 0;
     
@@ -412,7 +415,7 @@ static inline int main(LPWSTR * argvW, int argc) {
                     handleInputDomainRoutine = NULL;
                 }else{
                     if(initDomainRoutine){
-                        initDomainRoutine(domainMemory, &context->renderingTarget);
+                        initDomainRoutine(domainMemory, &context->renderingTarget, file);
                     }
                 }
                 context->freeze = false;

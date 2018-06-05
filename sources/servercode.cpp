@@ -157,6 +157,9 @@ struct ProgramContext : Common{
     bool beaconsRun;
     
     bool record;
+    bool wasRecord;
+    
+    bool replay;
     
     Image * renderingTarget;
     float32 accumulator;
@@ -169,6 +172,27 @@ struct ProgramContext : Common{
     uint8 activeModuleIndex;
     
     FileWatchHandle configFileWatch;
+    
+    struct Record{
+        struct {
+            v3 defaultOrientation;
+            v3 defaultPosition;
+        } defaultModule[2];
+        LocalTime startTime;
+        struct {
+            uint32 recordDataMemsCount;
+            uint32 recordDataXbCount;
+            //1khz - 1000/second 5min record = 
+            MemsData mems[300000];
+            //0.5hz - 5min = 150
+            XbData xb[150];
+            uint32 recordDataMemsIndex;
+            uint32 recordDataXbIndex;
+        } data[2];
+        
+    } recordData;
+    
+    char tempRecordContents[MEGABYTE(50)];
 };
 
 ProgramContext * programContext;
@@ -208,6 +232,9 @@ void resetModule(int index){
     module->gyroBias = {};
     module->gyroBiasUpper = {};
     
+    programContext->recordData.data[index].recordDataXbIndex = 0;
+    programContext->recordData.data[index].recordDataMemsIndex = 0;
+    
 }
 
 extern "C" __declspec(dllexport) void handleInputDomainRoutine(const ServerInput * input){
@@ -229,12 +256,19 @@ extern "C" __declspec(dllexport) void handleInputDomainRoutine(const ServerInput
     }
     
     if(input->record){
-        programContext->record = !programContext->record;
+        if(!programContext->replay){
+            programContext->record = !programContext->record;
+        }
+        
     }
 }
 
 extern "C" __declspec(dllexport) void boeingDomainRoutine(int index){
     if(!inited || !programContext->inited) return;
+    if(programContext->replay){
+        Sleep(1000);
+        return;
+    }
     NetRecvResult result;
     
     
@@ -314,7 +348,10 @@ extern "C" __declspec(dllexport) void boeingDomainRoutine(int index){
 
 extern "C" __declspec(dllexport) void beaconsDomainRoutine(){
     if(!inited || !programContext->inited) return;
-    
+    if(programContext->replay){
+        Sleep(1000);
+        return;
+    }
     NetRecvResult result;
     result.bufferLength = sizeof(Message);
     Message * message = &programContext->lastBeaconsMessage;
@@ -381,6 +418,10 @@ extern "C" __declspec(dllexport) void beaconsDomainRoutine(){
 
 extern "C" __declspec(dllexport) void serverDomainRoutine(){
     if(!inited || !programContext->inited) return;
+    if(programContext->replay){
+        Sleep(1000);
+        return;
+    }
     NetSocketSettings settings;
     settings.blocking = false;
     NetSocket socket;
@@ -528,7 +569,7 @@ static bool parseConfig(const char * line){
 }
 
 
-extern "C" __declspec(dllexport) void initDomainRoutine(void * memoryStart, Image * renderingTarget){
+extern "C" __declspec(dllexport) void initDomainRoutine(void * memoryStart, Image * renderingTarget, char * replayFile){
     
     initMemory(memoryStart);
     
@@ -539,19 +580,107 @@ extern "C" __declspec(dllexport) void initDomainRoutine(void * memoryStart, Imag
     initIo();
     
     if(!programContext->inited){
+        
         programContext->renderingTarget = renderingTarget;
         bool result = true;
         
-        result &= watchFile(configPath, &programContext->configFileWatch);
+        result = result && watchFile(configPath, &programContext->configFileWatch);
         ASSERT(result);
         if(hasFileChanged(&programContext->configFileWatch)){
-            result &= loadConfig(configPath, parseConfig);
+            result = result && loadConfig(configPath, parseConfig);
         }else{
             ASSERT(false);
         }
         
+        if(replayFile !=  NULL) programContext->replay = true;
+        if(programContext->replay){
+            FileContents contents;
+            result = result && getFileSize(replayFile, &contents.size);
+            ASSERT(result);
+            contents.contents = programContext->tempRecordContents;
+            result = result && readFile(replayFile, &contents);
+            ASSERT(result);
+            char line[1024];
+            
+            //beacon names
+            //beacon positions
+            //beacon frequency
+            
+            
+            //each module
+            
+            //module name
+            //module settings - sample rate, xb rate, sensitivity
+            //module default position & orientation
+            
+            //mems data count
+            //mems data
+            
+            //xb data count
+            //xb data
+            
+            //beacon names
+            result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%8s %8s %8s %8s", &programContext->beacons[0].sidLower, &programContext->beacons[1].sidLower, &programContext->beacons[2].sidLower, &programContext->beacons[3].sidLower) == 4;
+            //beacon position x
+            result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%f %f %f %f", &programContext->beacons[0].position.x, &programContext->beacons[1].position.x, &programContext->beacons[2].position.x, &programContext->beacons[3].position.x) == 4;
+            
+            //beacon position y
+            result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%f %f %f %f", &programContext->beacons[0].position.y, &programContext->beacons[1].position.y, &programContext->beacons[2].position.y, &programContext->beacons[3].position.y) == 4;
+            
+            //beacon position z
+            result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%f %f %f %f", &programContext->beacons[0].position.z, &programContext->beacons[1].position.z, &programContext->beacons[2].position.z, &programContext->beacons[3].position.z) == 4;
+            //frequency
+            uint16 kHz;
+            result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%hu", &kHz) == 1;
+            programContext->beacons[0].frequency = programContext->beacons[1].frequency = programContext->beacons[2].frequency = programContext->beacons[3].frequency = kHz;
+            
+            for(uint8 moduleIndex = 0; moduleIndex < 2; moduleIndex++){
+                ProgramContext::Module * module = &programContext->modules[moduleIndex];
+                //module name
+                if(getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%1c", &module->name) == 1){
+                    module->run = true;
+                    //mems rate
+                    result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%hu", &module->settings.sampleRate) == 1;
+                    //xbPeriod
+                    result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%f", &module->xbPeriod) == 1;
+                    //acc
+                    result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%u", &module->settings.accPrecision) == 1;
+                    //gyro
+                    result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%u", &module->settings.gyroPrecision) == 1;
+                    //default pos
+                    result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%f %f %f", &module->defaultPosition.x, &module->defaultPosition.y, &module->defaultPosition.z) == 3;
+                    //default orientation
+                    result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%f %f %f", &module->defaultOrientation.x, &module->defaultOrientation.y, &module->defaultOrientation.z) == 3;
+                    
+                    //mems data count
+                    result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%u", &programContext->recordData.data[moduleIndex].recordDataMemsCount) == 1;
+                    
+                    //mems data
+                    for(uint32 di = 0; di < programContext->recordData.data[moduleIndex].recordDataMemsCount; di++){
+                        result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%hd %hd %hd %hd %hd %hd", &programContext->recordData.data[moduleIndex].mems[di].accX, &programContext->recordData.data[moduleIndex].mems[di].accY, &programContext->recordData.data[moduleIndex].mems[di].accZ, &programContext->recordData.data[moduleIndex].mems[di].gyroX, &programContext->recordData.data[moduleIndex].mems[di].gyroY, &programContext->recordData.data[moduleIndex].mems[di].gyroZ) == 6;
+                        
+                        
+                    }
+                    
+                    
+                    //xb data count
+                    result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%u", &programContext->recordData.data[moduleIndex].recordDataXbCount) == 1;
+                    
+                    
+                    //xb data
+                    for(uint32 di = 0; di < programContext->recordData.data[moduleIndex].recordDataXbCount; di++){
+                        result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%lf %lf %lf %lf", &programContext->recordData.data[moduleIndex].xb[di].delay[0], &programContext->recordData.data[moduleIndex].xb[di].delay[1], &programContext->recordData.data[moduleIndex].xb[di].delay[2], &programContext->recordData.data[moduleIndex].xb[di].delay[3]) == 4;
+                        
+                        
+                    }
+                    
+                }
+                
+                ASSERT(result);
+            }
+        }
         
-        FileContents fontFile;
+        FileContents fontFile = {};
         result &= readFile("data\\font.bmp", &fontFile);
         Image source;
         result &= decodeBMP(&fontFile, &source);
@@ -582,34 +711,228 @@ extern "C" __declspec(dllexport) void initDomainRoutine(void * memoryStart, Imag
 extern "C" __declspec(dllexport) void processDomainRoutine(){
     if(!inited || !programContext->inited) return;
     float32 start = getProcessCurrentTime();
+    bool record = programContext->record;
+    //record beginning
+    if(record && !programContext->wasRecord){
+        programContext->recordData.startTime = getLocalTime();
+        for(uint8 i = 0; i < 2; i++){
+            programContext->recordData.defaultModule[i].defaultPosition = programContext->modules[i].position;
+            programContext->recordData.defaultModule[i].defaultOrientation = programContext->modules[i].orientation;
+            programContext->recordData.data[i].recordDataXbCount = 0;
+            programContext->recordData.data[i].recordDataMemsCount = 0;
+            
+        }
+    }else if(!record && programContext->wasRecord){
+        //recordend
+        FileContents contents;
+        contents.contents = programContext->tempRecordContents;
+        contents.size = 0;
+        
+        
+        //beacon names
+        //beacon positions
+        //beacon frequency
+        
+        
+        //each module
+        
+        //module name
+        //module settings - sample rate, xb rate, sensitivity
+        //module default position & orientation
+        
+        //mems data count
+        //mems data
+        
+        //xb data count
+        //xb data
+        
+        
+        char line[1024];
+        uint32 linesize = ARRAYSIZE(line);
+        uint32 offset = 0;
+        nint linelen = 0;
+        
+        //beacon names
+        snprintf(line, linesize, "%8s %8s %8s %8s\r\n", programContext->beacons[0].sidLower, programContext->beacons[1].sidLower, programContext->beacons[2].sidLower, programContext->beacons[3].sidLower);
+        linelen = strlen(line);
+        strncpy(contents.contents + offset, line, linelen);
+        offset += linelen;
+        
+        
+        //beacon x
+        snprintf(line, linesize, "%f %f %f %f\r\n", programContext->beacons[0].position.x, programContext->beacons[1].position.x, programContext->beacons[2].position.x, programContext->beacons[3].position.x);
+        linelen = strlen(line);
+        strncpy(contents.contents + offset, line, linelen);
+        offset += linelen;
+        
+        //beacon y
+        snprintf(line, linesize, "%f %f %f %f\r\n", programContext->beacons[0].position.y, programContext->beacons[1].position.y, programContext->beacons[2].position.y, programContext->beacons[3].position.y);
+        linelen = strlen(line);
+        strncpy(contents.contents + offset, line, linelen);
+        offset += linelen;
+        
+        //beacon z
+        snprintf(line, linesize, "%f %f %f %f\r\n", programContext->beacons[0].position.z, programContext->beacons[1].position.z, programContext->beacons[2].position.z, programContext->beacons[3].position.z);
+        linelen = strlen(line);
+        strncpy(contents.contents + offset, line, linelen);
+        offset += linelen;
+        
+        //frequency kHz
+        snprintf(line, linesize, "%hu\r\n", programContext->beacons[0].frequency);
+        linelen = strlen(line);
+        strncpy(contents.contents + offset, line, linelen);
+        offset += linelen;
+        
+        for(uint8 i = 0; i < 2; i++){
+            ProgramContext::Module * module = &programContext->modules[i];
+            if(module->run){
+                //module name
+                snprintf(line, linesize, "%c\r\n", module->name);
+                linelen = strlen(line);
+                strncpy(contents.contents + offset, line, linelen);
+                offset += linelen;
+                
+                //sample rate
+                snprintf(line, linesize, "%hu\r\n", module->settings.sampleRate);
+                linelen = strlen(line);
+                strncpy(contents.contents + offset, line, linelen);
+                offset += linelen;
+                //xb period
+                snprintf(line, linesize, "%f\r\n", module->xbPeriod);
+                linelen = strlen(line);
+                strncpy(contents.contents + offset, line, linelen);
+                offset += linelen;
+                //acc
+                snprintf(line, linesize, "%u\r\n", module->settings.accPrecision);
+                linelen = strlen(line);
+                strncpy(contents.contents + offset, line, linelen);
+                offset += linelen;
+                //gyro
+                snprintf(line, linesize, "%u\r\n", module->settings.gyroPrecision);
+                linelen = strlen(line);
+                strncpy(contents.contents + offset, line, linelen);
+                offset += linelen;
+                
+                //module default position
+                snprintf(line, linesize, "%f %f %f\r\n", programContext->recordData.defaultModule[i].defaultPosition.x, programContext->recordData.defaultModule[i].defaultPosition.y, programContext->recordData.defaultModule[i].defaultPosition.z);
+                linelen = strlen(line);
+                strncpy(contents.contents + offset, line, linelen);
+                offset += linelen;
+                
+                //module default orientation
+                snprintf(line, linesize, "%f %f %f\r\n", programContext->recordData.defaultModule[i].defaultOrientation.x, programContext->recordData.defaultModule[i].defaultOrientation.y, programContext->recordData.defaultModule[i].defaultOrientation.z);
+                linelen = strlen(line);
+                strncpy(contents.contents + offset, line, linelen);
+                offset += linelen;
+                
+                
+                //mems data count
+                snprintf(line, linesize, "%u\r\n", programContext->recordData.data[i].recordDataMemsCount);
+                linelen = strlen(line);
+                strncpy(contents.contents + offset, line, linelen);
+                offset += linelen;
+                //mems data
+                for(uint32 memsDataIndex = 0; memsDataIndex < programContext->recordData.data[i].recordDataMemsCount; memsDataIndex++){
+                    snprintf(line, linesize, "%hd %hd %hd %hd %hd %hd\r\n", programContext->recordData.data[i].mems[memsDataIndex].accX, programContext->recordData.data[i].mems[memsDataIndex].accY, programContext->recordData.data[i].mems[memsDataIndex].accZ, programContext->recordData.data[i].mems[memsDataIndex].gyroX, programContext->recordData.data[i].mems[memsDataIndex].gyroY, programContext->recordData.data[i].mems[memsDataIndex].gyroZ);
+                    linelen = strlen(line);
+                    strncpy(contents.contents + offset, line, linelen);
+                    offset += linelen;
+                }
+                
+                //xb data count
+                snprintf(line, linesize, "%u\r\n", programContext->recordData.data[i].recordDataXbCount);
+                linelen = strlen(line);
+                strncpy(contents.contents + offset, line, linelen);
+                offset += linelen;
+                //xb data
+                for(uint32 xbDataIndex = 0; xbDataIndex < programContext->recordData.data[i].recordDataXbCount; xbDataIndex++){
+                    snprintf(line, linesize, "%lf %lf %lf %lf\r\n", programContext->recordData.data[i].xb[xbDataIndex].delay[0], programContext->recordData.data[i].xb[xbDataIndex].delay[1],programContext->recordData.data[i].xb[xbDataIndex].delay[1], programContext->recordData.data[i].xb[xbDataIndex].delay[3]);
+                    linelen = strlen(line);
+                    strncpy(contents.contents + offset, line, linelen);
+                    offset += linelen;
+                }
+                
+            }
+        }
+        
+        
+        
+        contents.size = offset;
+        
+        char path[250];
+        sprintf(path, "records\\%hu_%hu_%hu-%hu-%hu-%hu.rec", programContext->recordData.startTime.year, programContext->recordData.startTime.month, programContext->recordData.startTime.day, programContext->recordData.startTime.hour, programContext->recordData.startTime.minute, programContext->recordData.startTime.second);
+        bool saveFileResult = saveFile(path, &contents);
+        ASSERT(saveFileResult);
+        POP;
+    }
+    programContext->wasRecord = record;
+    
+    
+    if(record){
+        for(uint8 i = 0; i < 2; i++){
+            ProgramContext::Module * module = &programContext->modules[i];
+            if(module->run){
+                uint32 memsSteps = module->memsStepsAvailable;
+                for(uint32 di = 0; di < memsSteps; di++){
+                    programContext->recordData.data[i].mems[programContext->recordData.data[i].recordDataMemsCount++] = module->memsData[(module->memsTailIndex + di) % ARRAYSIZE(ProgramContext::Module::memsData)];
+                    ASSERT(programContext->recordData.data[i].recordDataMemsCount < ARRAYSIZE(programContext->recordData.data[i].mems));
+                }
+                uint32 xbSteps = module->xbStepsAvailable;
+                for(uint32 di = 0; di < xbSteps; di++){
+                    programContext->recordData.data[i].xb[programContext->recordData.data[i].recordDataXbCount++] = module->xbData[(module->xbTailIndex + di) % ARRAYSIZE(ProgramContext::Module::xbData)];
+                    ASSERT(programContext->recordData.data[i].recordDataXbCount < ARRAYSIZE(programContext->recordData.data[i].xb));
+                }
+            }
+        }
+    }
     
     if(programContext->localisationType == LocalisationType_Mems){
         
         float32 dt = 0;
         const float32 g = mpu6050_g;
-        uint16 stepsAmount;
+        uint16 stepsAmount = 0;
         
         for(uint32 i = 0; i < ARRAYSIZE(programContext->modules); i++){
             ProgramContext::Module * module = &programContext->modules[i];
             
             if(module->run){
-                //wash out xb
+                //wash out xb steps
                 module->xbStepsAvailable = 0;
-                if(dt == 0){
-                    stepsAmount = module->memsStepsAvailable;
-                }else{
-                    stepsAmount = MIN(stepsAmount, module->memsStepsAvailable);
-                }
-                dt = mpu6050_getTimeDelta(module->settings.sampleRate);
                 
+                if(programContext->replay){
+                    
+                    if(dt == 0){
+                        stepsAmount = programContext->recordData.data[i].recordDataMemsCount - programContext->recordData.data[i].recordDataMemsIndex;
+                    }else{
+                        stepsAmount = MIN(stepsAmount, programContext->recordData.data[i].recordDataMemsCount - programContext->recordData.data[i].recordDataMemsIndex);
+                    }
+                    dt = mpu6050_getTimeDelta(module->settings.sampleRate);
+                    
+                }else{
+                    
+                    if(dt == 0){
+                        stepsAmount = module->memsStepsAvailable;
+                    }else{
+                        stepsAmount = MIN(stepsAmount, module->memsStepsAvailable);
+                    }
+                    dt = mpu6050_getTimeDelta(module->settings.sampleRate);
+                }
             }
         }
-        
-        stepsAmount = MIN(stepsAmount, (uint16)(programContext->accumulator / dt));
         if(stepsAmount == 0){
-            Sleep(500);
-            return;
+            if(programContext->replay){
+                for(uint32 i = 0; i < ARRAYSIZE(programContext->modules); i++){
+                    //reset
+                    resetModule(i);
+                    programContext->accumulator = 0;
+                    Sleep(100);
+                    return;
+                }
+            }else{
+                Sleep(500);
+            }
         }
+        stepsAmount = MIN(stepsAmount, (uint16)(programContext->accumulator / dt));
         const uint32 calibrationFrame = 100;
         const uint32 warmedUpFrame = 30;
         
@@ -624,7 +947,12 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
                     
                     int32 size = ARRAYSIZE(module->memsData);
                     
-                    MemsData * data = &module->memsData[module->memsTailIndex];
+                    MemsData * data;
+                    if(programContext->replay){
+                        data = &programContext->recordData.data[i].mems[programContext->recordData.data[i].recordDataMemsIndex++];
+                    }else{
+                        data = &module->memsData[module->memsTailIndex];
+                    }
                     v3 newGyro;
                     mpu6050_gyro2float(module->settings, data->gyroX, data->gyroY, data->gyroZ, &newGyro.x, &newGyro.y, &newGyro.z);
                     v3 newAcceleration;
@@ -711,13 +1039,12 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
                         }
                         
                     }
-                    module->memsTailIndex = (module->memsTailIndex + 1) % size;
+                    if(!programContext->replay) module->memsTailIndex = (module->memsTailIndex + 1) % size;
                     module->physicalFrame++;
                 }
                 FETCH_AND_ADD(&module->memsStepsAvailable, -stepsAmount);
             }
         }
-        
         
         if(dt == 0){
             programContext->accumulator = 0;
@@ -737,55 +1064,77 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
             if(module->run){
                 //wash out the mems data
                 module->memsStepsAvailable = 0;
-                
-                if(stepsAmount == 0){
-                    stepsAmount = module->xbStepsAvailable;
+                if(programContext->replay){
+                    if(stepsAmount == 0){
+                        stepsAmount = programContext->recordData.data[i].recordDataXbCount - programContext->recordData.data[i].recordDataXbIndex;
+                    }else{
+                        stepsAmount = MIN(stepsAmount, programContext->recordData.data[i].recordDataXbCount - programContext->recordData.data[i].recordDataXbIndex);
+                    }
                 }else{
-                    stepsAmount = MIN(stepsAmount, module->xbStepsAvailable);
+                    if(stepsAmount == 0){
+                        stepsAmount = module->xbStepsAvailable;
+                    }else{
+                        stepsAmount = MIN(stepsAmount, module->xbStepsAvailable);
+                    }
                 }
             }
         }
-        
         if(stepsAmount == 0){
-            Sleep(500);
-            return;
+            if(programContext->replay){
+                for(uint32 i = 0; i < ARRAYSIZE(programContext->modules); i++){
+                    //reset
+                    resetModule(i);
+                    programContext->accumulator = 0;
+                    Sleep(100);
+                    return;
+                }
+            }else{
+                Sleep(500);
+            }
         }
-        bool updateAcc = false;
+        
         
         for(uint32 i = 0; i < ARRAYSIZE(programContext->modules); i++){
             ProgramContext::Module * module = &programContext->modules[i];
             if(module->run){
-                updateAcc = true;
                 for(uint16 stepIndex = 0; stepIndex < stepsAmount; stepIndex++){
                     int32 size = ARRAYSIZE(module->xbData);
-                    XbData * data = &module->xbData[module->xbTailIndex];
+                    XbData * data;
+                    if(programContext->replay){
+                        data = &programContext->recordData.data[i].xb[programContext->recordData.data[i].recordDataXbIndex];
+                    }else{
+                        data = &module->xbData[module->xbTailIndex];
+                    }
                     float32 maxTiming = data->delay[0];
                     for(uint8 ti = 1; ti < ARRAYSIZE(XbData::delay); ti++){
                         if(data->delay[ti] > maxTiming) maxTiming = data->delay[ti];
                     }
                     if(maxTiming < programContext->accumulator){
-                        
+                        if(programContext->replay) programContext->recordData.data[i].recordDataXbIndex++;
                         //do stuff?
                         module->xbFrame++;
                         programContext->accumulator -= maxTiming;
                         module->xbTailIndex = (module->xbTailIndex + 1) % size;
                         FETCH_AND_ADD(&module->xbStepsAvailable, -1);
                     }else if(module->xbFrame < 1){
-                        module->xbTailIndex = (module->xbTailIndex + 1) % size;
-                        FETCH_AND_ADD(&module->xbStepsAvailable, -1);
-                        updateAcc = false;
+                        if(!programContext->replay){
+                            module->xbTailIndex = (module->xbTailIndex + 1) % size;
+                            FETCH_AND_ADD(&module->xbStepsAvailable, -1);
+                        }else{
+                            programContext->recordData.data[i].recordDataXbIndex++;
+                        }
+                        module->xbFrame++;
+                    }else{
+                        //simulate no more stepts
+                        break;
                     }
                     
                 }
                 
             }
         }
-        if(!updateAcc){
-            programContext->accumulator = 0;
-        }
         
     }
-    
     programContext->accumulator += getProcessCurrentTime() - start;
 }
 
@@ -805,6 +1154,7 @@ extern "C" __declspec(dllexport) void renderDomainRoutine(){
     Color grey = {200, 200, 200};
     Color blue = {255, 0xCC, 0};
     Color red = {0, 0, 255};
+    Color green = {0, 255, 0};
     
     ProgramContext::Module * activeModule = &programContext->modules[programContext->activeModuleIndex];
     
@@ -862,6 +1212,8 @@ extern "C" __declspec(dllexport) void renderDomainRoutine(){
         printToBitmap(programContext->renderingTarget, offset.x, offset.y - border, "TOP VIEW", &programContext->font, fontSize, white);
         if(programContext->record){
             printToBitmap(programContext->renderingTarget, offset.x + (strlen("TOP VIEW")+1) * fontSize, offset.y - border, "RECORDING", &programContext->font, fontSize, red);
+        }else if(programContext->replay){
+            printToBitmap(programContext->renderingTarget, offset.x + (strlen("TOP VIEW")+1) * fontSize, offset.y - border, "REPLAYING", &programContext->font, fontSize, green);
         }else{
             printToBitmap(programContext->renderingTarget, offset.x + (strlen("TOP VIEW")+1) * fontSize, offset.y - border, "(not recording)", &programContext->font, fontSize, grey);
         }
@@ -962,10 +1314,9 @@ extern "C" __declspec(dllexport) void renderDomainRoutine(){
         
         sprintf(buffer, "module: %1c", activeModule->name); 
         printToBitmap(programContext->renderingTarget, offset.x, offset.y, buffer, &programContext->font, fontSize);
+        offset.y += 2*fontSize;
         
-        
-        if(programContext->localisationType == LocalisationType_Xb || LocalisationType_Both){
-            offset.y += 2*fontSize;
+        if(programContext->localisationType == LocalisationType_Xb || programContext->localisationType == LocalisationType_Both){
             sprintf(buffer, "xb frame: %u", activeModule->xbFrame); 
             printToBitmap(programContext->renderingTarget, offset.x, offset.y, buffer, &programContext->font, fontSize);
             offset.y += fontSize;
@@ -973,7 +1324,7 @@ extern "C" __declspec(dllexport) void renderDomainRoutine(){
         }
         
         
-        if(programContext->localisationType == LocalisationType_Mems || LocalisationType_Both){
+        if(programContext->localisationType == LocalisationType_Mems || programContext->localisationType == LocalisationType_Both){
             sprintf(buffer, "phys frame: %u", activeModule->physicalFrame); 
             printToBitmap(programContext->renderingTarget, offset.x, offset.y, buffer, &programContext->font, fontSize);
             offset.y += fontSize;
@@ -1009,21 +1360,30 @@ extern "C" __declspec(dllexport) void renderDomainRoutine(){
             printToBitmap(programContext->renderingTarget, offset.x, offset.y, buffer, &programContext->font, fontSize);
             offset.y += fontSize;
             offset.x -= border;
-            
+            offset.y += fontSize;
         }
         
-        if(programContext->localisationType == LocalisationType_Xb || LocalisationType_Both){
-            offset.y += fontSize;
+        if(programContext->localisationType == LocalisationType_Xb || programContext->localisationType == LocalisationType_Both){
+            
             sprintf(buffer, "latest time period:"); 
             printToBitmap(programContext->renderingTarget, offset.x, offset.y, buffer, &programContext->font, fontSize);
             offset.y += fontSize;
             offset.x += border;
             
             for(uint8 beaconIndex = 0; beaconIndex < ARRAYSIZE(programContext->beacons); beaconIndex++){
-                
-                sprintf(buffer, "%9s: %.5f", programContext->beacons[beaconIndex].sidLower, activeModule->xbData[(activeModule->xbHeadIndex-1)%ARRAYSIZE(activeModule->xbData)].delay[beaconIndex]); 
-                printToBitmap(programContext->renderingTarget, offset.x, offset.y, buffer, &programContext->font, fontSize);
-                offset.y += fontSize;
+                if(programContext->replay){
+                    uint32 latestIndex = 0;
+                    if(programContext->recordData.data[programContext->activeModuleIndex].recordDataXbIndex != 0){
+                        latestIndex = programContext->recordData.data[programContext->activeModuleIndex].recordDataXbIndex - 1;
+                    }
+                    sprintf(buffer, "%9s: %.5f", programContext->beacons[beaconIndex].sidLower, programContext->recordData.data[programContext->activeModuleIndex].xb[latestIndex].delay[beaconIndex]);
+                    printToBitmap(programContext->renderingTarget, offset.x, offset.y, buffer, &programContext->font, fontSize);
+                    offset.y += fontSize;
+                }else{
+                    sprintf(buffer, "%9s: %.5f", programContext->beacons[beaconIndex].sidLower, activeModule->xbData[(activeModule->xbHeadIndex-1)%ARRAYSIZE(activeModule->xbData)].delay[beaconIndex]); 
+                    printToBitmap(programContext->renderingTarget, offset.x, offset.y, buffer, &programContext->font, fontSize);
+                    offset.y += fontSize;
+                }
                 
             }
             offset.y += border;
@@ -1049,10 +1409,8 @@ extern "C" __declspec(dllexport) void renderDomainRoutine(){
             
             sprintf(buffer, "z: %.3f", activeModule->orientation.z); 
             printToBitmap(programContext->renderingTarget, offset.x, offset.y, buffer, &programContext->font, fontSize, blue);
-            offset.y += fontSize;
+            offset.y += 2*fontSize;
             offset.x -= border;
-            
-            offset.y += border;
         }
         
         if(programContext->localisationType == LocalisationType_Mems || programContext->localisationType == LocalisationType_Both){
@@ -1073,10 +1431,9 @@ extern "C" __declspec(dllexport) void renderDomainRoutine(){
             
             sprintf(buffer, "z: %.3f", activeModule->acceleration.z); 
             printToBitmap(programContext->renderingTarget, offset.x, offset.y, buffer, &programContext->font, fontSize, red);
-            offset.y += fontSize;
+            offset.y += 2*fontSize;
             offset.x -= border;
             
-            offset.y += border;
         }
         
         if(programContext->localisationType == LocalisationType_Mems || programContext->localisationType == LocalisationType_Both){
