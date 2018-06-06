@@ -129,9 +129,17 @@ struct ProgramContext : Common{
         v3 gyroBias;
         v3 gyroBiasUpper;
         
+        v3 defaultGyroBiasLower;
+        v3 defaultGyroBias;
+        v3 defaultGyroBiasUpper;
+        
         v3 accelerationBiasLower;
         v3 accelerationBias;
         v3 accelerationBiasUpper;
+        
+        v3 defaultAccelerationBiasLower;
+        v3 defaultAccelerationBias;
+        v3 defaultAccelerationBiasUpper;
         
         uint32 physicalFrame;
         uint32 xbFrame;
@@ -224,13 +232,13 @@ void resetModule(int index){
     module->velocity = V3(0, 0, 0);
     module->acceleration = V3(0, 0, 0);
     
-    module->accelerationBiasLower = {};
-    module->accelerationBias = {};
-    module->accelerationBiasUpper = {};
+    module->accelerationBiasLower = module->defaultAccelerationBiasLower;
+    module->accelerationBias = module->defaultAccelerationBias;
+    module->accelerationBiasUpper = module->defaultAccelerationBiasUpper;
     
-    module->gyroBiasLower = {};
-    module->gyroBias = {};
-    module->gyroBiasUpper = {};
+    module->gyroBiasLower = module->defaultGyroBiasLower;
+    module->gyroBias = module->defaultGyroBias;
+    module->gyroBiasUpper = module->defaultGyroBiasUpper;
     
     programContext->recordData.data[index].recordDataXbIndex = 0;
     programContext->recordData.data[index].recordDataMemsIndex = 0;
@@ -613,6 +621,14 @@ extern "C" __declspec(dllexport) void initDomainRoutine(void * memoryStart, Imag
             //module settings - sample rate, xb rate, sensitivity
             //module default position & orientation
             
+            //acc bias lower
+            //acc bias
+            //acc bias upper
+            
+            //gyro bias lower
+            //gyro bias
+            //gyro bias upper
+            
             //mems data count
             //mems data
             
@@ -652,6 +668,21 @@ extern "C" __declspec(dllexport) void initDomainRoutine(void * memoryStart, Imag
                     //default orientation
                     result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%f %f %f", &module->defaultOrientation.x, &module->defaultOrientation.y, &module->defaultOrientation.z) == 3;
                     
+                    //acc bias lower
+                    result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%f %f %f", &module->defaultAccelerationBiasLower.x, &module->defaultAccelerationBiasLower.y, &module->defaultAccelerationBiasLower.z) == 3;
+                    //acc bias
+                    result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%f %f %f", &module->defaultAccelerationBias.x, &module->defaultAccelerationBias.y, &module->defaultAccelerationBias.z) == 3;
+                    //acc bias upper
+                    result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%f %f %f", &module->defaultAccelerationBiasUpper.x, &module->defaultAccelerationBiasUpper.y, &module->defaultAccelerationBiasUpper.z) == 3;
+                    
+                    //gyro bias lower
+                    result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%f %f %f", &module->defaultGyroBiasLower.x, &module->defaultGyroBiasLower.y, &module->defaultGyroBiasLower.z) == 3;
+                    //gyro bias
+                    result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%f %f %f", &module->defaultGyroBias.x, &module->defaultGyroBias.y, &module->defaultGyroBias.z) == 3;
+                    //gyro bias upper
+                    result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%f %f %f", &module->defaultGyroBiasUpper.x, &module->defaultGyroBiasUpper.y, &module->defaultGyroBiasUpper.z) == 3;
+                    
+                    
                     //mems data count
                     result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%u", &programContext->recordData.data[moduleIndex].recordDataMemsCount) == 1;
                     
@@ -673,7 +704,7 @@ extern "C" __declspec(dllexport) void initDomainRoutine(void * memoryStart, Imag
                         
                         
                     }
-                    
+                    resetModule(moduleIndex);
                 }
                 
                 ASSERT(result);
@@ -739,6 +770,15 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
         //module name
         //module settings - sample rate, xb rate, sensitivity
         //module default position & orientation
+        
+        //acc bias lower
+        //acc bias
+        //acc bias upper
+        
+        //gyro bias lower
+        //gyro bias
+        //gyro bias upper
+        
         
         //mems data count
         //mems data
@@ -825,6 +865,38 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
                 strncpy(contents.contents + offset, line, linelen);
                 offset += linelen;
                 
+                //acc bias lower
+                snprintf(line, linesize, "%f %f %f\r\n", programContext->modules[i].accelerationBiasLower.x, programContext->modules[i].accelerationBiasLower.y, programContext->modules[i].accelerationBiasLower.z);
+                linelen = strlen(line);
+                strncpy(contents.contents + offset, line, linelen);
+                offset += linelen;
+                //acc bias
+                snprintf(line, linesize, "%f %f %f\r\n", programContext->modules[i].accelerationBias.x, programContext->modules[i].accelerationBias.y, programContext->modules[i].accelerationBias.z);
+                linelen = strlen(line);
+                strncpy(contents.contents + offset, line, linelen);
+                offset += linelen;
+                //acc bias upper
+                snprintf(line, linesize, "%f %f %f\r\n", programContext->modules[i].accelerationBiasUpper.x, programContext->modules[i].accelerationBiasUpper.y, programContext->modules[i].accelerationBiasUpper.z);
+                linelen = strlen(line);
+                strncpy(contents.contents + offset, line, linelen);
+                offset += linelen;
+                
+                //gyro bias lower
+                snprintf(line, linesize, "%f %f %f\r\n", programContext->modules[i].gyroBiasLower.x, programContext->modules[i].gyroBiasLower.y, programContext->modules[i].gyroBiasLower.z);
+                linelen = strlen(line);
+                strncpy(contents.contents + offset, line, linelen);
+                offset += linelen;
+                //gyro bias
+                snprintf(line, linesize, "%f %f %f\r\n", programContext->modules[i].gyroBias.x, programContext->modules[i].gyroBias.y, programContext->modules[i].gyroBias.z);
+                linelen = strlen(line);
+                strncpy(contents.contents + offset, line, linelen);
+                offset += linelen;
+                //gyro bias upper
+                snprintf(line, linesize, "%f %f %f\r\n", programContext->modules[i].gyroBiasUpper.x, programContext->modules[i].gyroBiasUpper.y, programContext->modules[i].gyroBiasUpper.z);
+                linelen = strlen(line);
+                strncpy(contents.contents + offset, line, linelen);
+                offset += linelen;
+                
                 
                 //mems data count
                 snprintf(line, linesize, "%u\r\n", programContext->recordData.data[i].recordDataMemsCount);
@@ -860,25 +932,25 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
         contents.size = offset;
         
         char path[250];
-        sprintf(path, "records\\%hu_%hu_%hu-%hu-%hu-%hu.rec", programContext->recordData.startTime.year, programContext->recordData.startTime.month, programContext->recordData.startTime.day, programContext->recordData.startTime.hour, programContext->recordData.startTime.minute, programContext->recordData.startTime.second);
+        sprintf(path, "records\\%04hu_%02hu_%02hu-%02hu-%02hu-%02hu.rec", programContext->recordData.startTime.year, programContext->recordData.startTime.month, programContext->recordData.startTime.day, programContext->recordData.startTime.hour, programContext->recordData.startTime.minute, programContext->recordData.startTime.second);
         bool saveFileResult = saveFile(path, &contents);
         ASSERT(saveFileResult);
-        POP;
     }
     programContext->wasRecord = record;
     
-    
+    int32 memsSteps[2];
+    int32 xbSteps[2];
     if(record){
         for(uint8 i = 0; i < 2; i++){
             ProgramContext::Module * module = &programContext->modules[i];
+            memsSteps[i] = module->memsStepsAvailable;
+            xbSteps[i] = module->xbStepsAvailable;
             if(module->run){
-                uint32 memsSteps = module->memsStepsAvailable;
-                for(uint32 di = 0; di < memsSteps; di++){
+                for(uint32 di = 0; di < memsSteps[i]; di++){
                     programContext->recordData.data[i].mems[programContext->recordData.data[i].recordDataMemsCount++] = module->memsData[(module->memsTailIndex + di) % ARRAYSIZE(ProgramContext::Module::memsData)];
                     ASSERT(programContext->recordData.data[i].recordDataMemsCount < ARRAYSIZE(programContext->recordData.data[i].mems));
                 }
-                uint32 xbSteps = module->xbStepsAvailable;
-                for(uint32 di = 0; di < xbSteps; di++){
+                for(uint32 di = 0; di < xbSteps[i]; di++){
                     programContext->recordData.data[i].xb[programContext->recordData.data[i].recordDataXbCount++] = module->xbData[(module->xbTailIndex + di) % ARRAYSIZE(ProgramContext::Module::xbData)];
                     ASSERT(programContext->recordData.data[i].recordDataXbCount < ARRAYSIZE(programContext->recordData.data[i].xb));
                 }
@@ -897,7 +969,7 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
             
             if(module->run){
                 //wash out xb steps
-                module->xbStepsAvailable = 0;
+                FETCH_AND_ADD(&module->xbStepsAvailable, -xbSteps[i]);
                 
                 if(programContext->replay){
                     
@@ -911,9 +983,9 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
                 }else{
                     
                     if(dt == 0){
-                        stepsAmount = module->memsStepsAvailable;
+                        stepsAmount = memsSteps[i];
                     }else{
-                        stepsAmount = MIN(stepsAmount, module->memsStepsAvailable);
+                        stepsAmount = MIN(stepsAmount, memsSteps[i]);
                     }
                     dt = mpu6050_getTimeDelta(module->settings.sampleRate);
                 }
@@ -936,8 +1008,8 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
         const uint32 calibrationFrame = 100;
         const uint32 warmedUpFrame = 30;
         
-        const float32 accelerationThreshold = 0.45f;
-        const float32 orientationThreshold = 1;
+        const float32 accelerationThreshold = 0;
+        const float32 orientationThreshold = 0;
         
         for(uint32 i = 0; i < ARRAYSIZE(programContext->modules); i++){
             ProgramContext::Module * module = &programContext->modules[i];
@@ -958,7 +1030,7 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
                     v3 newAcceleration;
                     mpu6050_acc2float(module->settings, data->accX, data->accY, data->accZ, &newAcceleration.x, &newAcceleration.y, &newAcceleration.z);
                     
-                    if(module->physicalFrame > calibrationFrame)
+                    if(programContext->replay || module->physicalFrame > calibrationFrame)
                     {
                         newGyro -= module->gyroBias;
                         for(uint8 i = 0; i < 3; i++){
@@ -1063,7 +1135,7 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
             
             if(module->run){
                 //wash out the mems data
-                module->memsStepsAvailable = 0;
+                FETCH_AND_ADD(&module->memsStepsAvailable, -memsSteps[i]);
                 if(programContext->replay){
                     if(stepsAmount == 0){
                         stepsAmount = programContext->recordData.data[i].recordDataXbCount - programContext->recordData.data[i].recordDataXbIndex;
@@ -1072,9 +1144,9 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
                     }
                 }else{
                     if(stepsAmount == 0){
-                        stepsAmount = module->xbStepsAvailable;
+                        stepsAmount = xbSteps[i];
                     }else{
-                        stepsAmount = MIN(stepsAmount, module->xbStepsAvailable);
+                        stepsAmount = MIN(stepsAmount, xbSteps[i]);
                     }
                 }
             }
@@ -1109,21 +1181,18 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
                     for(uint8 ti = 1; ti < ARRAYSIZE(XbData::delay); ti++){
                         if(data->delay[ti] > maxTiming) maxTiming = data->delay[ti];
                     }
-                    if(maxTiming < programContext->accumulator){
+                    if(!programContext->replay && module->xbFrame < 1){
+                        module->xbTailIndex = (module->xbTailIndex + 1) % size;
+                        FETCH_AND_ADD(&module->xbStepsAvailable, -1);
+                        module->xbFrame++;
+                    }else if(maxTiming < programContext->accumulator){
                         if(programContext->replay) programContext->recordData.data[i].recordDataXbIndex++;
                         //do stuff?
+                        
                         module->xbFrame++;
                         programContext->accumulator -= maxTiming;
                         module->xbTailIndex = (module->xbTailIndex + 1) % size;
                         FETCH_AND_ADD(&module->xbStepsAvailable, -1);
-                    }else if(module->xbFrame < 1){
-                        if(!programContext->replay){
-                            module->xbTailIndex = (module->xbTailIndex + 1) % size;
-                            FETCH_AND_ADD(&module->xbStepsAvailable, -1);
-                        }else{
-                            programContext->recordData.data[i].recordDataXbIndex++;
-                        }
-                        module->xbFrame++;
                     }else{
                         //simulate no more stepts
                         break;
@@ -1376,11 +1445,11 @@ extern "C" __declspec(dllexport) void renderDomainRoutine(){
                     if(programContext->recordData.data[programContext->activeModuleIndex].recordDataXbIndex != 0){
                         latestIndex = programContext->recordData.data[programContext->activeModuleIndex].recordDataXbIndex - 1;
                     }
-                    sprintf(buffer, "%9s: %.5f", programContext->beacons[beaconIndex].sidLower, programContext->recordData.data[programContext->activeModuleIndex].xb[latestIndex].delay[beaconIndex]);
+                    sprintf(buffer, "%9s: %.15f", programContext->beacons[beaconIndex].sidLower, programContext->recordData.data[programContext->activeModuleIndex].xb[latestIndex].delay[beaconIndex]);
                     printToBitmap(programContext->renderingTarget, offset.x, offset.y, buffer, &programContext->font, fontSize);
                     offset.y += fontSize;
                 }else{
-                    sprintf(buffer, "%9s: %.5f", programContext->beacons[beaconIndex].sidLower, activeModule->xbData[(activeModule->xbHeadIndex-1)%ARRAYSIZE(activeModule->xbData)].delay[beaconIndex]); 
+                    sprintf(buffer, "%9s: %.15f", programContext->beacons[beaconIndex].sidLower, activeModule->xbData[(activeModule->xbHeadIndex-1)%ARRAYSIZE(activeModule->xbData)].delay[beaconIndex]); 
                     printToBitmap(programContext->renderingTarget, offset.x, offset.y, buffer, &programContext->font, fontSize);
                     offset.y += fontSize;
                 }

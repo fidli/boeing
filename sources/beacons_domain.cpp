@@ -55,7 +55,7 @@ extern "C"{
 
 LocalTime lt;
 char logbuffer[1024];
-#define LOG(message)  lt = getLocalTime(); sprintf(logbuffer, "[%2hu.%2hu.%4hu %2hu:%2hu:%2hu] %900s\r\n", lt.day, lt.month, lt.year, lt.hour, lt.minute, lt.second, (message)); print(logbuffer);
+#define LOG(message,...)  lt = getLocalTime(); sprintf(logbuffer, "[%02hu.%02hu.%04hu %02hu:%02hu:%02hu] %900s\r\n", lt.day, lt.month, lt.year, lt.hour, lt.minute, lt.second, (message)); printf(logbuffer, __VA_ARGS__);
 
 struct State : Common{
     XBS2Handle * coordinator;
@@ -112,7 +112,6 @@ static bool connectToServer(){
     LOG("connecting to server");
     if(!tcpConnect(&state->beaconsSocket, state->ip, state->port)){
         LOG("connecting to server failed");
-        printf("le: %d\n", GetLastError());
         return false;
     }
     
@@ -181,8 +180,7 @@ extern "C" __declspec(dllexport) void initDomainRoutine(void * platformMemory){
             if(openHandle(path, beacon)){
                 LOG("handle opened. detecting baudrate");
                 if(xbs2_detectAndSetStandardBaudRate(beacon)){
-                    LOG("baudrate detected");
-                    printf("%u\n", beacon->baudrate);
+                    LOG("baudrate detected %u", beacon->baudrate);
                     LOG("initing module");
                     while(!xbs2_initModule(beacon)){
                         LOG("failed to init module");
@@ -214,17 +212,14 @@ extern "C" __declspec(dllexport) void initDomainRoutine(void * platformMemory){
         char channelMask[5];
         ASSERT(xbs2_getChannelMask(state->coordinator->channel, channelMask));
         
-        LOG("found channel");
-        LOG(state->coordinator->channel);
-        LOG("pan id");
-        LOG(state->coordinator->pan);
+        LOG("found channel: %s", state->coordinator->channel);
+        LOG("pan id: %s", state->coordinator->pan);
         
         //reset network on others
         for(uint8 serialIndex = 0; serialIndex < ARRAYSIZE(state->coms); serialIndex++){
             XBS2Handle * beacon = &state->beacons[serialIndex].serial;
             if(beacon != state->coordinator){
-                LOG("joining network with");
-                LOG(beacon->sidLower);
+                LOG("joining network with %s", beacon->sidLower);
                 while(!xbs2_initNetwork(beacon, channelMask) || (strncmp(state->coordinator->pan, beacon->pan, 5) != 0 || strncmp(state->coordinator->channel, beacon->channel, 3) != 0));
                 beacon->frequency = state->coordinator->frequency;
                 LOG("success");
@@ -287,7 +282,6 @@ static void sendAndReconnect(const NetSendSource * source){
 
 extern "C" __declspec(dllexport) void iterateDomainRoutine(){
     if(!inited || !state->inited) return;
-    
     //forward to server
     for(uint8 boeingIndex = 0; boeingIndex < 2; boeingIndex++){
         uint16 count = -1;
@@ -298,7 +292,6 @@ extern "C" __declspec(dllexport) void iterateDomainRoutine(){
         ASSERT(count*32 < ARRAYSIZE(state->sendBuffer));
         
         if(count > 0){
-            
             for(uint8 beaconIndex = 0; beaconIndex < ARRAYSIZE(state->beacons); beaconIndex++){
                 uint16 size = ARRAYSIZE(state->beacons[beaconIndex].fifoData[boeingIndex]);
                 uint16 tail = (state->beacons[beaconIndex].tail[boeingIndex] + count) % size;
