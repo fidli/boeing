@@ -41,6 +41,7 @@ struct Message{
                     char channel[3];
                     char pan[5];
                     char sidLower[4][9];
+                    uint64 timeDivisor;
                 } beacon;
             };
             

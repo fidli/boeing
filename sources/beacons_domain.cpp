@@ -63,7 +63,7 @@ struct State : Common{
     struct{
         XBS2Handle serial; //31 bytes
         uint64 tick[2];
-        float64 fifoData[2][4*2000];
+        int64 fifoData[2][4*2000];
         int16 head[2];
         int16 tail[2];
         uint16 fifoCount[2];
@@ -109,9 +109,21 @@ static bool parseConfig(const char * line){
 }
 
 static bool connectToServer(){
+    
+    closeSocket(&state->beaconsSocket);
+    
+    NetSocketSettings connectionSettings;
+    connectionSettings.reuseAddr = true;
+    connectionSettings.blocking = true;
+    LOG("opening socket");
+    if(!openSocket(&state->beaconsSocket, &connectionSettings)){
+        LOG("opening socket failed");
+        return false;
+    }
+    
     LOG("connecting to server");
     if(!tcpConnect(&state->beaconsSocket, state->ip, state->port)){
-        LOG("connecting to server failed");
+        LOG("connecting to server failed %d", WSAGetLastError());
         return false;
     }
     
@@ -122,6 +134,7 @@ static bool connectToServer(){
     handshake.type = MessageType_Init;
     handshake.init.clientType = ClientType_Beacon;
     handshake.init.beacon.frequency = state->coordinator->frequency;
+    handshake.init.beacon.timeDivisor = getTickDivisor();
     strncpy(handshake.init.beacon.channel, state->coordinator->channel, 3);
     strncpy(handshake.init.beacon.pan, state->coordinator->pan, 5);
     for(uint8 beaconIndex = 0; beaconIndex < ARRAYSIZE(state->beacons); beaconIndex++){
@@ -230,14 +243,6 @@ extern "C" __declspec(dllexport) void initDomainRoutine(void * platformMemory){
 #endif
         LOG("XBS2 set");
         
-        NetSocketSettings connectionSettings;
-        connectionSettings.reuseAddr = true;
-        connectionSettings.blocking = true;
-        LOG("opening socket");
-        if(!openSocket(&state->beaconsSocket, &connectionSettings)){
-            LOG("opening socket failed");
-            return;
-        }
         if(!connectToServer()){
             return;
         }
@@ -256,7 +261,7 @@ extern "C" __declspec(dllexport) void beaconDomainRoutine(int index){
         uint8 moduleId = response - '1'; 
         uint64 oldTick = state->beacons[index].tick[moduleId];
         state->beacons[index].tick[moduleId] = getTick();
-        float64 res = translateTickToTime(state->beacons[index].tick[moduleId] - oldTick);
+        uint64 res = state->beacons[index].tick[moduleId] - oldTick;
         
         state->beacons[index].fifoData[moduleId][state->beacons[index].head[moduleId]] = res;
         state->beacons[index].head[moduleId] = (state->beacons[index].head[moduleId]+1) % ARRAYSIZE(state->beacons[index].fifoData[moduleId]);
@@ -270,14 +275,13 @@ extern "C" __declspec(dllexport) void beaconDomainRoutine(int index){
 
 static void sendAndReconnect(const NetSendSource * source){
     NetResultType result;
-    do{
-        result = netSend(&state->beaconsSocket, source);
-        if(result == NetResultType_Closed || result == NetResultType_Timeout){
-            printf("send error, trying reconnect\n");
-            connectToServer();
-            Sleep(1000);
-        }
-    }while(result != NetResultType_Ok);
+    result = netSend(&state->beaconsSocket, source);
+    if(result != NetResultType_Ok){
+        printf("send error, trying reconnect\n");
+        connectToServer();
+        Sleep(1000);
+    }
+    
 }
 
 extern "C" __declspec(dllexport) void iterateDomainRoutine(){
@@ -298,7 +302,7 @@ extern "C" __declspec(dllexport) void iterateDomainRoutine(){
                 
                 for(uint16 i = state->beacons[beaconIndex].tail[boeingIndex], j = beaconIndex; i != tail; i = (i+1) % size, j += ARRAYSIZE(state->beacons))
                 {
-                    ((float64*)state->sendBuffer)[j] = state->beacons[beaconIndex].fifoData[boeingIndex][i];
+                    ((uint64*)state->sendBuffer)[j] = state->beacons[beaconIndex].fifoData[boeingIndex][i];
                 }
                 state->beacons[beaconIndex].tail[boeingIndex] += count;
                 state->beacons[beaconIndex].tail[boeingIndex] %= size;

@@ -1,4 +1,5 @@
-extensions="";
+extensions = ".c.cpp.h.m.bat.sh.4coder";
+open_recursively = true;
 
 fkey_command_win[1] = {"build_remote_pi.bat", "*compilation*", true};
 fkey_command_win[2] = {"build_x64_beacons.bat", "*compilation*", true};

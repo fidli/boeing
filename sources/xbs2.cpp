@@ -109,7 +109,7 @@ static void xbs2_exitCommandModeQuick(XBS2Handle * module){
 bool xbs2_detectAndSetStandardBaudRate(XBS2Handle * module){
     module->guardTime = 1.1f;
     //sorted by default/popularity?
-    uint32 rates[] = {115200, 9600, 19200, 38400, 57600, 4800, 2400, 1200};
+    uint32 rates[] = {9600, 115200,  19200, 38400, 57600, 4800, 2400, 1200};
     for(uint8 rateIndex = 0; rateIndex < ARRAYSIZE(rates); rateIndex++){
         if(setBaudRate(module, rates[rateIndex])){
             if(clearSerialPort(module)){
@@ -370,8 +370,9 @@ bool xbs2_initModule(XBS2Handle * module){
             //100ms 64
             success = success && xbs2_sendMessage(module, "ATGT64\r") && waitForAnyMessage(module, result) > 0 && !strncmp("OK\r", result, 3);
             if(success) module->guardTime = 0.110f;
-            //baud rate 115200
             
+            /*
+            //baud rate 115200
             success = success && xbs2_sendMessage(module, "ATBD7\r") && waitForAnyMessage(module, result) > 0 && !strncmp("OK\r", result, 3);
             if(success)
             {
@@ -380,7 +381,7 @@ bool xbs2_initModule(XBS2Handle * module){
                 success = success && setBaudRate(module, module->baudrate);
                 return success;
             }
-            
+            */
             
             
         }

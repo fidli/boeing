@@ -1,4 +1,3 @@
-
 extern "C" void * __cdecl memset(void *, int, size_t);
 #pragma intrinsic(memset)
 extern "C" void * __cdecl memcpy(void *, const void *, size_t);

@@ -7,7 +7,6 @@
 #include "wiringPi.h"
 #include "wiringPiI2C.h"
 
-
 #include "linux_serial.cpp"
 
 #include "mpu6050.cpp"
@@ -105,6 +104,19 @@ extern "C" void pumpXbDomainRoutine(){
 
 static bool connectToServer(){
     
+    closeSocket(&domainState->boeingSocket);
+    
+    NetSocketSettings settings;
+    settings.blocking = true;
+    settings.reuseAddr = true;
+    
+    printf("opening socket\n");
+    if(!openSocket(&domainState->boeingSocket, &settings)){
+        printf("failed to open socket\n");
+        return false;
+    }
+    
+    
     printf("connecting to server: %16s:%6s\n", domainState->ip, domainState->port);
     if(tcpConnect(&domainState->boeingSocket, domainState->ip, domainState->port) == false){
         printf("failed to connect to server\n");
@@ -174,15 +186,15 @@ static bool connectToServer(){
 
 static void sendAndReconnect(const NetSendSource * source){
     NetResultType result;
-    do{
-        result = netSend(&domainState->boeingSocket, source);
-        if(result == NetResultType_Closed || result == NetResultType_Timeout){
-            printf("send error, trying reconnect\n");
-            connectToServer();
-            printf("errno: %d\n", errno);
-            sleep(1);
-        }
-    }while(result != NetResultType_Ok);
+    
+    result = netSend(&domainState->boeingSocket, source);
+    if(result == NetResultType_Closed || result == NetResultType_Timeout){
+        printf("send error, trying reconnect\n");
+        connectToServer();
+        printf("errno: %d\n", errno);
+        sleep(1);
+    }
+    
 }
 
 
@@ -395,14 +407,6 @@ extern "C" void initDomainRoutine(void * memoryStart){
         
 #if IMMEDIATE
 #else
-        NetSocketSettings settings;
-        settings.blocking = true;
-        settings.reuseAddr = true;
-        
-        printf("opening socket\n");
-        if(!openSocket(&domainState->boeingSocket, &settings)){
-            printf("failed to open socket\n");
-        }
         
         if(!connectToServer()){
             return;
