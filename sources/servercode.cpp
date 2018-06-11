@@ -104,8 +104,8 @@ enum LocalisationType{
     LocalisationTypeCount
 };
 
-#define METHOD_32 1
-#define METHOD_64 0
+#define METHOD_32 0
+#define METHOD_64 1
 
 struct ProgramContext : Common{
     bool inited;
@@ -155,7 +155,7 @@ struct ProgramContext : Common{
         v3 worldPosition32;
         v3 worldOrientation32;
         
-        v3 defaultRotationAngles32;
+        
         
         v3 defaultWorldOrientation32;
         v3 defaultWorldPosition32;
@@ -179,7 +179,7 @@ struct ProgramContext : Common{
         v3_64 worldPosition64;
         v3_64 worldOrientation64;
         
-        v3_64 defaultRotationAngles64;
+        
         
         v3_64 defaultWorldOrientation64;
         v3_64 defaultWorldPosition64;
@@ -218,11 +218,15 @@ struct ProgramContext : Common{
         char pan[5];
 #if METHOD_32
         v3 worldPosition32;
+        float32 moduleDistance32[2];
 #endif
 #if METHOD_64
         v3_64 worldPosition64;
+        float64 moduleDistance64[2];
 #endif
         char sidLower[9];
+        
+        
     } beacons[4];
     
     bool beaconsRun;
@@ -231,6 +235,7 @@ struct ProgramContext : Common{
     bool wasRecord;
     
     bool replay;
+    bool restartReplay;
     
     Image * renderingTarget;
     float32 accumulator;
@@ -249,12 +254,10 @@ struct ProgramContext : Common{
 #if METHOD_32
             v3 defaultWorldOrientation32;
             v3 defaultWorldPosition32;
-            v3 defaultRotationAngles32;
 #endif
 #if METHOD_64
             v3_64 defaultWorldOrientation64;
             v3_64 defaultWorldPosition64;
-            v3_64 defaultRotationAngles64;
 #endif
             uint16 biasCount;
         } defaultModule[2];
@@ -308,18 +311,26 @@ void resetModule(int index, bool haltBoeing = true){
     
 #if METHOD_32
     module->worldOrientation32 = module->defaultWorldOrientation32;
-    module->rotationAngles32 = module->defaultRotationAngles32;
+    
     module->worldPosition32 = module->defaultWorldPosition32;
     module->velocity32 = V3(0, 0, 0);
     module->acceleration32 = V3(0, 0, 0);
     
+    for(uint8 beaconIndex = 0; beaconIndex < ARRAYSIZE(programContext->beacons); beaconIndex++){
+        programContext->beacons[beaconIndex].moduleDistance32[index] = length(V2(module->worldPosition64.x, module->worldPosition64.y) - V2(programContext->beacons[beaconIndex].worldPosition32.x, programContext->beacons[beaconIndex].worldPosition32.y));
+    }
+    
 #endif
 #if METHOD_64
     module->worldOrientation64 = module->defaultWorldOrientation64;
-    module->rotationAngles64 = module->defaultRotationAngles64;
+    
     module->worldPosition64 = module->defaultWorldPosition64;
     module->velocity64 = V3_64(0, 0, 0);
     module->acceleration64 = V3_64(0, 0, 0);
+    
+    for(uint8 beaconIndex = 0; beaconIndex < ARRAYSIZE(programContext->beacons); beaconIndex++){
+        programContext->beacons[beaconIndex].moduleDistance64[index] = length64(V2_64(module->worldPosition64.x, module->worldPosition64.y) - V2_64(programContext->beacons[beaconIndex].worldPosition64.x, programContext->beacons[beaconIndex].worldPosition64.y));
+    }
     
 #endif
     
@@ -352,6 +363,34 @@ void resetModule(int index, bool haltBoeing = true){
         
         mpu6050_acc32_float32(module->settings, module->accelerationBiasUpper.x,  module->accelerationBiasUpper.y,  module->accelerationBiasUpper.z, &module->accelerationBiasUpper32.x, &module->accelerationBiasUpper32.y, &module->accelerationBiasUpper32.z);
         module->accelerationBiasUpper32 -=  module->accelerationBias32;
+        
+        //yz plane is x rotation (roll)
+        v2 downward = V2(0,-1);
+        v2 deltaX = V2(module->accelerationBias32.y, module->accelerationBias32.z);
+        
+        //y,x plane is z rotation (yaw)
+        v2 forward = V2(0, -1);
+        v2 deltaZ = V2(module->accelerationBias32.y, module->accelerationBias32.x);
+        
+        //x, z plane is y rotation (pitch)
+        v2 deltaY = V2(module->accelerationBias32.x, module->accelerationBias32.z);
+        
+        float32 rotationX = 180 - radToDeg(radAngle(deltaX, downward));
+        float32 rotationY = 180 - radToDeg(radAngle(deltaZ, forward));
+        float32 rotationZ = 180 - radToDeg(radAngle(deltaY, downward));
+        
+        module->rotationAngles32 = V3(rotationX, -rotationY, -rotationZ);
+        
+        v4 quatX = Quat(V3(1, 0, 0), degToRad(-module->rotationAngles32.x));
+        v4 quatY = Quat(V3(0, 1, 0), degToRad(-module->rotationAngles32.y));
+        v4 quatZ = Quat(V3(0, 0, 1), degToRad(-module->rotationAngles32.z));
+        
+        mat4 rotationMatrix  = quaternionToMatrix(quatX * quatY * quatZ);
+        
+        module->worldOrientation32 = rotationMatrix * module->worldOrientation32;
+        
+        
+        
 #endif
 #if METHOD_64
         mpu6050_gyro32_float64(module->settings, module->gyroBias.x,  module->gyroBias.y,  module->gyroBias.z, &module->gyroBias64.x, &module->gyroBias64.y, &module->gyroBias64.z);
@@ -373,6 +412,33 @@ void resetModule(int index, bool haltBoeing = true){
         
         mpu6050_acc32_float64(module->settings, module->accelerationBiasUpper.x,  module->accelerationBiasUpper.y,  module->accelerationBiasUpper.z, &module->accelerationBiasUpper64.x, &module->accelerationBiasUpper64.y, &module->accelerationBiasUpper64.z);
         module->accelerationBiasUpper64 -=  module->accelerationBias64;
+        
+        //yz plane is x rotation (roll)
+        v2_64 downward = V2_64(0,-1);
+        v2_64 deltaX = V2_64(module->accelerationBias64.y, module->accelerationBias64.z);
+        
+        //y,x plane is z rotation (yaw)
+        v2_64 forward = V2_64(0, -1);
+        v2_64 deltaZ = V2_64(module->accelerationBias64.y, module->accelerationBias64.x);
+        
+        //x, z plane is y rotation (pitch)
+        v2_64 deltaY = V2_64(module->accelerationBias64.x, module->accelerationBias64.z);
+        
+        float64 rotationX = 180 - radToDeg64(radAngle64(deltaX, downward));
+        float64 rotationY = 180 - radToDeg64(radAngle64(deltaZ, forward));
+        float64 rotationZ = 180 - radToDeg64(radAngle64(deltaY, downward));
+        
+        module->rotationAngles64 = V3_64(rotationX, -rotationY, -rotationZ);
+        
+        v4_64 quatX = Quat64(V3_64(1, 0, 0), degToRad64(-module->rotationAngles64.x));
+        v4_64 quatY = Quat64(V3_64(0, 1, 0), degToRad64(-module->rotationAngles64.y));
+        v4_64 quatZ = Quat64(V3_64(0, 0, 1), degToRad64(-module->rotationAngles64.z));
+        
+        mat4_64 rotationMatrix  = quaternionToMatrix64(quatX * quatY * quatZ);
+        
+        module->worldOrientation64 = rotationMatrix * module->worldOrientation64;
+        
+        
 #endif
     }
     
@@ -406,6 +472,8 @@ extern "C" __declspec(dllexport) void handleInputDomainRoutine(const ServerInput
     if(input->record){
         if(!programContext->replay){
             programContext->record = !programContext->record;
+        }else{
+            programContext->restartReplay = true;
         }
         
     }
@@ -439,6 +507,7 @@ extern "C" __declspec(dllexport) void boeingDomainRoutine(int index){
         result.buffer = ((char *) wrap) + module->accumulatedSize;
         NetResultType resultCode = netRecv(&programContext->boeingSocket[index], &result);
         if(resultCode == NetResultType_Ok){
+            if(result.resultLength != 0){
             module->accumulatedSize += result.resultLength;
             if(module->accumulatedSize == sizeof(Message)){
                 
@@ -494,6 +563,9 @@ extern "C" __declspec(dllexport) void boeingDomainRoutine(int index){
                 }
                 module->accumulatedSize = 0;
             }
+            }else{
+                Sleep(100);
+            }
         }else{
             closeSocket(&programContext->boeingSocket[index]);
             module->run = false;
@@ -518,6 +590,7 @@ extern "C" __declspec(dllexport) void beaconsDomainRoutine(){
         result.buffer = ((char *) message) + programContext->beaconsAccumulatedSize;
         NetResultType resultCode = netRecv(&programContext->beaconsSocket, &result);
         if(resultCode == NetResultType_Ok){
+            if(result.resultLength != 0){
             programContext->beaconsAccumulatedSize += result.resultLength;
             if(programContext->beaconsAccumulatedSize == sizeof(Message)){
                 if(message->type == MessageType_Reset){
@@ -568,7 +641,9 @@ extern "C" __declspec(dllexport) void beaconsDomainRoutine(){
                 }
                 programContext->beaconsAccumulatedSize = 0;
             }
-            
+            }else{
+                Sleep(100);
+            }
         }else{
             closeSocket(&programContext->beaconsSocket);
             programContext->beaconsRun = false;
@@ -663,10 +738,15 @@ extern "C" __declspec(dllexport) void serverDomainRoutine(){
                                 //it should land on source index
                                 if(sourceIndex != targetIndex){
                                     //swap
+#if METHOD_32
                                     v3 tempPosition = programContext->beacons[sourceIndex].worldPosition32;
                                     programContext->beacons[sourceIndex].worldPosition32 = programContext->beacons[targetIndex].worldPosition32;
                                     programContext->beacons[targetIndex].worldPosition32 = tempPosition;
-                                    
+#elif METHOD_64
+                                    v3_64 tempPosition = programContext->beacons[sourceIndex].worldPosition64;
+                                    programContext->beacons[sourceIndex].worldPosition64 = programContext->beacons[targetIndex].worldPosition64;
+                                    programContext->beacons[targetIndex].worldPosition64 = tempPosition;
+#endif
                                     //swap one sided, the sid is getting written later
                                     strncpy(programContext->beacons[targetIndex].sidLower, programContext->beacons[sourceIndex].sidLower, 9);
                                 }
@@ -697,6 +777,8 @@ extern "C" __declspec(dllexport) void serverDomainRoutine(){
             }
         }while(resultCode == NetResultType_Ok);
         if(!good) closeSocket(&socket);
+    }else{
+        sleep(1);
     }
     
 }
@@ -823,7 +905,7 @@ extern "C" __declspec(dllexport) void initDomainRoutine(void * memoryStart, Imag
             
             //module name
             //module settings - sample rate, xb rate, sensitivity
-            //module default position & orientation & world orientation
+            //module default position & world orientation
             
             //acc bias lower
             //acc bias
@@ -899,14 +981,7 @@ extern "C" __declspec(dllexport) void initDomainRoutine(void * memoryStart, Imag
 #if METHOD_64
                     result = result && sscanf(line, "%lf %lf %lf", &module->defaultWorldPosition64.x, &module->defaultWorldPosition64.y, &module->defaultWorldPosition64.z) == 3;
 #endif
-                    //default orientation
-                    result = result && getNextLine(&contents, line, ARRAYSIZE(line));
-#if METHOD_32
-                    result = result && sscanf(line, "%f %f %f", &module->defaultRotationAngles32.x, &module->defaultRotationAngles32.y, &module->defaultRotationAngles32.z) == 3;
-#endif
-#if METHOD_64
-                    result = result && sscanf(line, "%lf %lf %lf", &module->defaultRotationAngles64.x, &module->defaultRotationAngles64.y, &module->defaultRotationAngles64.z) == 3;
-#endif
+                    
                     //default World orientation
                     result = result && getNextLine(&contents, line, ARRAYSIZE(line));
 #if METHOD_32
@@ -1012,12 +1087,10 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
 #if METHOD_32
             programContext->recordData.defaultModule[i].defaultWorldPosition32 = programContext->modules[i].worldPosition32;
             programContext->recordData.defaultModule[i].defaultWorldOrientation32 = programContext->modules[i].worldOrientation32;
-            programContext->recordData.defaultModule[i].defaultRotationAngles32 = programContext->modules[i].rotationAngles32;
 #endif
 #if METHOD_64
             programContext->recordData.defaultModule[i].defaultWorldPosition64 = programContext->modules[i].worldPosition64;
             programContext->recordData.defaultModule[i].defaultWorldOrientation64 = programContext->modules[i].worldOrientation64;
-            programContext->recordData.defaultModule[i].defaultRotationAngles64 = programContext->modules[i].rotationAngles64;
 #endif
             programContext->recordData.data[i].recordDataXbCount = 0;
             programContext->recordData.data[i].recordDataMemsCount = 0;
@@ -1038,7 +1111,7 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
         
         //module name
         //module settings - sample rate, xb rate, sensitivity
-        //module default position & orientation & world orientation
+        //module default position  & world orientation
         
         //acc bias lower
         //acc bias
@@ -1151,12 +1224,6 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
                 strncpy(contents.contents + offset, line, linelen);
                 offset += linelen;
                 
-                //module default orientation
-                snprintf(line, linesize, "%f %f %f\r\n", programContext->recordData.defaultModule[i].defaultRotationAngles32.x, programContext->recordData.defaultModule[i].defaultRotationAngles32.y, programContext->recordData.defaultModule[i].defaultRotationAngles32.z);
-                linelen = strlen(line);
-                strncpy(contents.contents + offset, line, linelen);
-                offset += linelen;
-                
                 //module default world orientation
                 snprintf(line, linesize, "%f %f %f\r\n", programContext->recordData.defaultModule[i].defaultWorldOrientation32.x, programContext->recordData.defaultModule[i].defaultWorldOrientation32.y, programContext->recordData.defaultModule[i].defaultWorldOrientation32.z);
                 linelen = strlen(line);
@@ -1167,12 +1234,6 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
 #if METHOD_64
                 //module default position
                 snprintf(line, linesize, "%lf %lf %lf\r\n", programContext->recordData.defaultModule[i].defaultWorldPosition64.x, programContext->recordData.defaultModule[i].defaultWorldPosition64.y, programContext->recordData.defaultModule[i].defaultWorldPosition64.z);
-                linelen = strlen(line);
-                strncpy(contents.contents + offset, line, linelen);
-                offset += linelen;
-                
-                //module default orientation
-                snprintf(line, linesize, "%lf %lf %lf\r\n", programContext->recordData.defaultModule[i].defaultRotationAngles64.x, programContext->recordData.defaultModule[i].defaultRotationAngles64.y, programContext->recordData.defaultModule[i].defaultRotationAngles64.z);
                 linelen = strlen(line);
                 strncpy(contents.contents + offset, line, linelen);
                 offset += linelen;
@@ -1281,10 +1342,12 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
             }
             if(programContext->replay){
                 memsSteps[i] = programContext->recordData.data[i].recordDataMemsCount - programContext->recordData.data[i].recordDataMemsIndex;
+                xbSteps[i] = programContext->recordData.data[i].recordDataXbCount - programContext->recordData.data[i].recordDataXbIndex;
             }else{
                 memsSteps[i] = module->memsStepsAvailable;
+                xbSteps[i] = module->xbStepsAvailable;
             }
-            xbSteps[i] = module->xbStepsAvailable;
+            
             ASSERT(memsSteps[i] >= 0);
             ASSERT(xbSteps[i] >= 0);
             if(record){
@@ -1302,7 +1365,11 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
     
     if(programContext->localisationType == LocalisationType_Mems){
         
+#if METHOD_32
         float32 dt = 0;
+#elif METHOD_64
+        float64 dt = 0;
+#endif
         const float32 g = mpu6050_g;
         int32 stepsAmount = 0;
         
@@ -1318,18 +1385,24 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
                 }else{
                     stepsAmount = MIN(stepsAmount, memsSteps[i]);
                 }
+#if METHOD_32
                 dt = mpu6050_getTimeDelta(module->settings.sampleRate);
+#elif METHOD_64
+                dt = mpu6050_getTimeDelta64(module->settings.sampleRate);
+#endif
             }
         }
-        if(stepsAmount == 0){
+        if(programContext->restartReplay || stepsAmount == 0){
             if(programContext->replay){
                 for(uint32 i = 0; i < ARRAYSIZE(programContext->modules); i++){
                     //reset
                     resetModule(i);
                     programContext->accumulator = 0;
+                    programContext->restartReplay = false;
                     Sleep(100);
                     return;
                 }
+               
             }else{
                 Sleep(500);
             }
@@ -1390,38 +1463,127 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
                         
                         module->worldOrientation32 = rotationMatrix * module->worldOrientation32;
                         
-                        //world orientation is forward
-                        v3 upwardOrientation = rotationYMatrix(degToRad(90)) * module->worldOrientation32;
-                        v3 rightHandOrientation = rotationZMatrix(degToRad(-90)) * module->worldOrientation32;
+                        module->accelerationBias32 = rotationMatrix * module->accelerationBias32;
                         
-                        v3 currentAcceleration = (module->worldOrientation32 * (-newAcceleration.x)) + (upwardOrientation * (-newAcceleration.z)) + (rightHandOrientation * (newAcceleration.y));
-                        
-                        currentAcceleration = V3(-newAcceleration.x, 0, 0);
-                        currentAcceleration = (currentAcceleration - module->accelerationBias32);
+                        /*v3 currentAcceleration = (newAcceleration - module->accelerationBias32);
                         for(uint8 i = 0; i < 3; i++){
                             if(currentAcceleration.v[i] >= accBiasBorderAttun * module->accelerationBiasLower32.v[i] && currentAcceleration.v[i] <= accBiasBorderAttun * module->accelerationBiasUpper32.v[i]){
                                 currentAcceleration.v[i] = 0;
                             }
                         }
+                        */
+                        v3 currentAcceleration = newAcceleration;
+                        //world orientation is forward
+                        v3 upwardOrientation = rotationYMatrix(degToRad(90)) * module->worldOrientation32;
+                        v3 rightHandOrientation = rotationZMatrix(degToRad(-90)) * module->worldOrientation32;
+                        
+                        //currentAcceleration = (module->worldOrientation32 * (-currentAcceleration.x)) + (upwardOrientation * (-currentAcceleration.z)) + (rightHandOrientation * (currentAcceleration.y));
+                        
+                        currentAcceleration = (module->worldOrientation32 * (-newAcceleration.x));// + (upwardOrientation * (-newAcceleration.z)) + (rightHandOrientation * (newAcceleration.y));
+                        
+                        //currentAcceleration.y = currentAcceleration.z = 0;
                         currentAcceleration = currentAcceleration * g;
                         
                         v3 oldWorldPosition = module->worldPosition32;
-                        v3 oldVelocity = module->velocity32;
                         
-                        module->velocity32 = currentAcceleration * dt;
-                        
-                        
-                        
-                        module->worldPosition32 = oldWorldPosition + oldVelocity*dt  + 0.5f*currentAcceleration*dt*dt;
-                        
-                        
-                        module->acceleration32 = currentAcceleration;
-                        
+                        if(length(module->acceleration32) < 0.01f && length(currentAcceleration) < 0.01f){
+                            module->velocity32 = {};
+                            module->acceleration32 = {};
+                        }else{
+                            
+                            v3 oldVelocity = module->velocity32;
+                            
+                            module->velocity32 += currentAcceleration * dt;
+                            
+                            
+                            
+                            module->worldPosition32 = oldWorldPosition + oldVelocity*dt + 0.5f*currentAcceleration*dt*dt;
+                            
+                            
+                            module->acceleration32 = currentAcceleration;
+                        }
                         
                         
 #endif
                         
 #if METHOD_64  
+                        float64 gyroBiasBorderAttun = 1;
+                        float64 accBiasBorder = 0.05f;
+                        
+                        v3_64 newGyro;
+                        mpu6050_gyro16_float64(module->settings, data->gyroX, data->gyroY, data->gyroZ, &newGyro.x, &newGyro.y, &newGyro.z);
+                        v3_64 newAcceleration;
+                        mpu6050_acc16_float64(module->settings, data->accX, data->accY, data->accZ, &newAcceleration.x, &newAcceleration.y, &newAcceleration.z);
+                        
+                        newGyro -= module->gyroBias64;
+                        for(uint8 i = 0; i < 3; i++){
+                            if(newGyro.v[i] >= gyroBiasBorderAttun * module->gyroBiasLower64.v[i] && newGyro.v[i] <= gyroBiasBorderAttun * module->gyroBiasUpper64.v[i]){
+                                newGyro.v[i] = 0;
+                            }
+                        }
+                        //newGyro.y = -newGyro.y;
+                        v3_64 currentRotationAngles = newGyro * dt;
+                        
+                        //rotation difference
+                        v4_64 quatX = Quat64(V3_64(1, 0, 0), degToRad64(-currentRotationAngles.x));
+                        v4_64 quatY = Quat64(V3_64(0, 1, 0), degToRad64(-currentRotationAngles.y));
+                        v4_64 quatZ = Quat64(V3_64(0, 0, 1), degToRad64(-currentRotationAngles.z));
+                        
+                        mat4_64 rotationMatrix  = quaternionToMatrix64(quatX * quatY * quatZ);
+                        
+                        module->rotationAngles64 += currentRotationAngles;
+                        for(uint8 i = 0; i < 3; i++){
+                            module->rotationAngles64.v[i] = fmodd(module->rotationAngles64.v[i], 360);
+                        }
+                        
+                        module->worldOrientation64 = rotationMatrix * module->worldOrientation64;
+                        
+                        
+                        
+                        
+                        module->accelerationBias64 = rotationMatrix * module->accelerationBias64;
+                        
+                        v3_64 currentAcceleration = (newAcceleration - module->accelerationBias64);
+                        
+                        
+
+                        for(uint8 i = 0; i < 3; i++){
+                            if(currentAcceleration.v[i] >= -accBiasBorder && currentAcceleration.v[i] <= accBiasBorder){
+                                currentAcceleration.v[i] = 0;
+                            }
+                        }
+                        
+
+                        //world orientation is forward
+                        v3_64 upwardOrientation = rotationYMatrix64(degToRad64(90)) * module->worldOrientation64;
+                        v3_64 rightHandOrientation = rotationZMatrix64(degToRad64(-90)) * module->worldOrientation64;
+                        
+                        currentAcceleration = (module->worldOrientation64 * (-currentAcceleration.x)) + (upwardOrientation * (-currentAcceleration.z)) + (rightHandOrientation * (currentAcceleration.y));
+                        
+                        
+//currentAcceleration  = (module->worldOrientation64 * (-currentAcceleration.x));
+                        
+                        currentAcceleration = currentAcceleration * g;
+                        
+                        v3_64 oldWorldPosition = module->worldPosition64;
+                       
+                        if(length64(module->acceleration64) < 0.05f && length64(currentAcceleration) < 0.05f){
+                            module->velocity64 = {};
+                            module->acceleration64 = {};
+                        }else{
+                            
+                            v3_64 oldVelocity = module->velocity64;
+                            
+                            module->velocity64 += currentAcceleration * dt;
+                            
+                            
+                            
+                            module->worldPosition64 = oldWorldPosition + oldVelocity*dt + 0.5f*currentAcceleration*dt*dt;
+                           
+                        }
+                        
+                        module->acceleration64 = currentAcceleration;
+                        
                         
                         
 #endif
@@ -1448,6 +1610,34 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
                         
                         mpu6050_acc32_float32(module->settings, module->accelerationBiasUpper.x,  module->accelerationBiasUpper.y,  module->accelerationBiasUpper.z, &module->accelerationBiasUpper32.x, &module->accelerationBiasUpper32.y, &module->accelerationBiasUpper32.z);
                         module->accelerationBiasUpper32 -=  module->accelerationBias32;
+                        
+                        
+                        //yz plane is x rotation (roll)
+                        v2 downward = V2(0,-1);
+                        v2 deltaX = V2(module->accelerationBias32.y, module->accelerationBias32.z);
+                        
+                        //y,x plane is z rotation (yaw)
+                        v2 forward = V2(0, -1);
+                        v2 deltaZ = V2(module->accelerationBias32.y, module->accelerationBias32.x);
+                        
+                        //x, z plane is y rotation (pitch)
+                        v2 deltaY = V2(module->accelerationBias32.x, module->accelerationBias32.z);
+                        
+                        float32 rotationX = 180 - radToDeg(radAngle(deltaX, downward));
+                        float32 rotationY = 180 - radToDeg(radAngle(deltaZ, forward));
+                        float32 rotationZ = 180 - radToDeg(radAngle(deltaY, downward));
+                        
+                        module->rotationAngles32 = V3(rotationX, -rotationY, -rotationZ);
+                        
+                        v4 quatX = Quat(V3(1, 0, 0), degToRad(-module->rotationAngles32.x));
+                        v4 quatY = Quat(V3(0, 1, 0), degToRad(-module->rotationAngles32.y));
+                        v4 quatZ = Quat(V3(0, 0, 1), degToRad(-module->rotationAngles32.z));
+                        
+                        mat4 rotationMatrix  = quaternionToMatrix(quatX * quatY * quatZ);
+                        
+                        module->worldOrientation32 = rotationMatrix * module->worldOrientation32;
+                        
+                        
 #endif
 #if METHOD_64
                         
@@ -1470,6 +1660,32 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
                         
                         mpu6050_acc32_float64(module->settings, module->accelerationBiasUpper.x,  module->accelerationBiasUpper.y,  module->accelerationBiasUpper.z, &module->accelerationBiasUpper64.x, &module->accelerationBiasUpper64.y, &module->accelerationBiasUpper64.z);
                         module->accelerationBiasUpper64 -=  module->accelerationBias64;
+                        
+                        //yz plane is x rotation (roll)
+                        v2_64 downward = V2_64(0,-1);
+                        v2_64 deltaX = V2_64(module->accelerationBias64.y, module->accelerationBias64.z);
+                        
+                        //y,x plane is z rotation (yaw)
+                        v2_64 forward = V2_64(0, -1);
+                        v2_64 deltaZ = V2_64(module->accelerationBias64.y, module->accelerationBias64.x);
+                        
+                        //x, z plane is y rotation (pitch)
+                        v2_64 deltaY = V2_64(module->accelerationBias64.x, module->accelerationBias64.z);
+                        
+                        float64 rotationX = 180 - radToDeg64(radAngle64(deltaX, downward));
+                        float64 rotationY = 180 - radToDeg64(radAngle64(deltaZ, forward));
+                        float64 rotationZ = 180 - radToDeg64(radAngle64(deltaY, downward));
+                        
+                        module->rotationAngles64 = V3_64(rotationX, -rotationY, -rotationZ);
+                        
+                        v4_64 quatX = Quat64(V3_64(1, 0, 0), degToRad64(-module->rotationAngles64.x));
+                        v4_64 quatY = Quat64(V3_64(0, 1, 0), degToRad64(-module->rotationAngles64.y));
+                        v4_64 quatZ = Quat64(V3_64(0, 0, 1), degToRad64(-module->rotationAngles64.z));
+                        
+                        mat4_64 rotationMatrix  = quaternionToMatrix64(quatX * quatY * quatZ);
+                        
+                        module->worldOrientation64 = rotationMatrix * module->worldOrientation64;
+                        
 #endif
                         
                     }else{
@@ -1521,19 +1737,12 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
                 //wash out the mems data
                 FETCH_AND_ADD(&module->memsStepsAvailable, -memsSteps[i]);
                 module->memsTailIndex = (module->memsTailIndex + memsSteps[i]) % ARRAYSIZE(module->memsData); 
-                if(programContext->replay){
-                    if(stepsAmount == 0){
-                        stepsAmount = programContext->recordData.data[i].recordDataXbCount - programContext->recordData.data[i].recordDataXbIndex;
-                    }else{
-                        stepsAmount = MIN(stepsAmount, programContext->recordData.data[i].recordDataXbCount - programContext->recordData.data[i].recordDataXbIndex);
-                    }
-                }else{
                     if(stepsAmount == 0){
                         stepsAmount = xbSteps[i];
                     }else{
                         stepsAmount = MIN(stepsAmount, xbSteps[i]);
                     }
-                }
+                
             }
         }
         if(stepsAmount == 0){
@@ -1550,8 +1759,11 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
             }
         }
         
-        
-        for(uint32 i = 0; i < ARRAYSIZE(programContext->modules); i++){
+        int32 stepsToTake = 0;
+        float64 totalTime = 0;
+        for(;;){
+            float64  maxTiming = 0;
+            for(uint32 i = 0; i < ARRAYSIZE(programContext->modules); i++){
             ProgramContext::Module * module = &programContext->modules[i];
             if(module->run){
                 for(uint16 stepIndex = 0; stepIndex < stepsAmount; stepIndex++){
@@ -1562,34 +1774,42 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
                     }else{
                         data = &module->xbData[module->xbTailIndex];
                     }
-                    float64  maxTiming = (float64) data->delay[0] / programContext->beacons[0].timeDivisor;
+                        maxTiming  = MAX(translateTickToTime(data->delay[0], programContext->beacons[0].timeDivisor), maxTiming);
                     for(uint8 ti = 1; ti < ARRAYSIZE(XbData::delay); ti++){
-                        float64  maxTimingCandidate = (float64) data->delay[ti] / programContext->beacons[ti].timeDivisor;
+                        float64  maxTimingCandidate = translateTickToTime(data->delay[ti], programContext->beacons[ti].timeDivisor);
                         if(maxTimingCandidate > maxTiming) maxTiming = maxTimingCandidate;
                     }
-                    if(!programContext->replay && module->xbFrame < 1){
-                        module->xbTailIndex = (module->xbTailIndex + 1) % size;
-                        FETCH_AND_ADD(&module->xbStepsAvailable, -1);
-                        module->xbFrame++;
-                    }else if(maxTiming < programContext->accumulator){
-                        if(programContext->replay) programContext->recordData.data[i].recordDataXbIndex++;
-                        //do stuff?
-                        
-                        module->xbFrame++;
-                        programContext->accumulator -= maxTiming;
-                        module->xbTailIndex = (module->xbTailIndex + 1) % size;
-                        FETCH_AND_ADD(&module->xbStepsAvailable, -1);
-                    }else{
-                        //simulate no more stepts
-                        break;
-                    }
-                    
                 }
-                
             }
+            }
+            if(totalTime + maxTiming < programContext->accumulator){
+                totalTime += maxTiming;
+                stepsToTake++;
+            }else{
+                break;
+            }
+            
+        }
+            
+        if(stepsToTake > 0){
+            for(uint32 i = 0; i < ARRAYSIZE(programContext->modules); i++){
+                ProgramContext::Module * module = &programContext->modules[i];
+                if(module->run){
+                    for(uint16 stepIndex = 0; stepIndex < stepsToTake; stepIndex++){
+                        //do stuff
+                    }
+                    if(programContext->replay){
+                        programContext->recordData.data[i].recordDataXbIndex++;
+                    }else{
+                    FETCH_AND_ADD(&module->xbStepsAvailable, -stepsToTake);
+                    }
+                }
+            }
+        programContext->accumulator -= totalTime;
+        }
         }
         
-    }
+           
     programContext->accumulator += getProcessCurrentTime() - start;
 }
 
@@ -1610,6 +1830,16 @@ extern "C" __declspec(dllexport) void renderDomainRoutine(){
     Color blue = {255, 0xCC, 0};
     Color red = {0, 0, 255};
     Color green = {0, 255, 0};
+    Color black = {0, 0 , 0};
+    
+    Color beaconsColors[4] = {
+        {53, 73, 0},
+        {219, 109, 0},
+        {0, 73, 146},
+        {182, 109, 255}
+    };
+    
+    Color moduleColor = {150, 255, 255};
     
     ProgramContext::Module * activeModule = &programContext->modules[programContext->activeModuleIndex];
     
@@ -1639,7 +1869,7 @@ extern "C" __declspec(dllexport) void renderDomainRoutine(){
     
     float32 maximumAcc = powd(2, activeModule->settings.accPrecision + 1) * mpu6050_g;
     
-    //dynamic shit
+    //dynamic stuff
     int32 humanSize = (int32)(0.6f * size);
     
     //body
@@ -1714,6 +1944,7 @@ extern "C" __declspec(dllexport) void renderDomainRoutine(){
         }
         float32 scaleX = ((bottomRightCorner.x - offset.x - 2*border)/2)/maxX;
         float32 scaleY = ((bottomRightCorner.y - offset.y - 2*border)/2)/maxY;
+        scaleX = scaleY = MIN(scaleY, scaleX);
         
         
         dv2 frameCenter = {(bottomRightCorner.x + offset.x)/2, (bottomRightCorner.y + offset.y)/2};
@@ -1745,12 +1976,28 @@ extern "C" __declspec(dllexport) void renderDomainRoutine(){
         
         dv2 pos;
         for(uint8 beaconIndex = 0; beaconIndex < ARRAYSIZE(programContext->beacons); beaconIndex++){
+#if METHOD_32
             pos.x = (int32)(scaleX * programContext->beacons[beaconIndex].worldPosition32.x);
             pos.y = (int32)(scaleY * -programContext->beacons[beaconIndex].worldPosition32.y);
+#elif METHOD_64
+            pos.x = (int32)(scaleX * programContext->beacons[beaconIndex].worldPosition64.x);
+            pos.y = (int32)(scaleY * -programContext->beacons[beaconIndex].worldPosition64.y);
+#endif
             pos = pos + frameCenter;
-            drawCircle(programContext->renderingTarget, &pos, 10, blue, 1);
+            drawCircle(programContext->renderingTarget, &pos, 10, beaconsColors[beaconIndex], 1, true);
+                       if(programContext->localisationType == LocalisationType_Xb || programContext->localisationType == LocalisationType_Both){
+#if METHOD_32
+                drawCircle(programContext->renderingTarget, &pos, (uint32)(scaleX * programContext->beacons[beaconIndex].moduleDistance32[programContext->activeModuleIndex]), beaconsColors[beaconIndex], 1);
+
+#elif METHOD_64
+                drawCircle(programContext->renderingTarget, &pos, (uint32)(scaleX * programContext->beacons[beaconIndex].moduleDistance64[programContext->activeModuleIndex]), beaconsColors[beaconIndex], 1);
+
+#endif
+
+            }
             pos = pos + DV2(-10, 10);
             printToBitmap(programContext->renderingTarget, pos.x, pos.y, programContext->beacons[beaconIndex].sidLower + 5, &programContext->font, 12, white);
+
         }
         
         for(uint8 moduleIndex = 0; moduleIndex < ARRAYSIZE(programContext->modules); moduleIndex++){
@@ -1764,7 +2011,7 @@ extern "C" __declspec(dllexport) void renderDomainRoutine(){
 #endif
                 int32 radius = 20;
                 pos = pos + frameCenter;
-                drawCircle(programContext->renderingTarget, &pos, radius, red, 1);
+                drawCircle(programContext->renderingTarget, &pos, radius, moduleColor, 1, true);
                 v2 direction;
 #if METHOD_32
                 direction = V2(programContext->modules[moduleIndex].worldOrientation32.x, programContext->modules[moduleIndex].worldOrientation32.y);
@@ -1789,11 +2036,11 @@ extern "C" __declspec(dllexport) void renderDomainRoutine(){
                 dv2 dB = v2Todv2(B);
                 dv2 dC = v2Todv2(C);
                 
-                drawTriangle(programContext->renderingTarget, &dA, &dB, &dC, red, thickness*2);
+                drawTriangle(programContext->renderingTarget, &dA, &dB, &dC, moduleColor, thickness*2, true);
                 
                 pos = pos + DV2(-(radius/4), (-radius/2));
                 char name[2] = {programContext->modules[moduleIndex].name};
-                printToBitmap(programContext->renderingTarget, pos.x, pos.y, name, &programContext->font, radius, white);
+                printToBitmap(programContext->renderingTarget, pos.x, pos.y, name, &programContext->font, radius, black);
             }
         }
         
@@ -1905,10 +2152,7 @@ extern "C" __declspec(dllexport) void renderDomainRoutine(){
             
             for(uint8 beaconIndex = 0; beaconIndex < ARRAYSIZE(programContext->beacons); beaconIndex++){
                 if(programContext->replay){
-                    uint32 latestIndex = 0;
-                    if(programContext->recordData.data[programContext->activeModuleIndex].recordDataXbIndex != 0){
-                        latestIndex = programContext->recordData.data[programContext->activeModuleIndex].recordDataXbIndex - 1;
-                    }
+                    uint32 latestIndex = programContext->recordData.data[programContext->activeModuleIndex].recordDataXbIndex;      
                     sprintf(buffer, "%9s: %.15f", programContext->beacons[beaconIndex].sidLower, programContext->recordData.data[programContext->activeModuleIndex].xb[latestIndex].delay[beaconIndex]/(float64)programContext->beacons[beaconIndex].timeDivisor);
                     printToBitmap(programContext->renderingTarget, offset.x, offset.y, buffer, &programContext->font, fontSize);
                     offset.y += fontSize;
@@ -1928,7 +2172,7 @@ extern "C" __declspec(dllexport) void renderDomainRoutine(){
 #if METHOD_32
             sprintf(buffer, "world orientation: %.3f", length(activeModule->worldOrientation32)); 
 #elif METHOD_64
-            sprintf(buffer, "world orientation: %.3lf", length(activeModule->worldOrientation64)); 
+            sprintf(buffer, "world orientation: %.3lf", length64(activeModule->worldOrientation64)); 
 #endif
             printToBitmap(programContext->renderingTarget, offset.x, offset.y, buffer, &programContext->font, fontSize, blue);
             offset.y += fontSize;
@@ -1965,7 +2209,7 @@ extern "C" __declspec(dllexport) void renderDomainRoutine(){
 #if METHOD_32
             sprintf(buffer, "acc: %5.2f m/s2", length(activeModule->acceleration32));
 #elif METHOD_64
-            sprintf(buffer, "acc: %5.2lf m/s2", length(activeModule->acceleration64));
+            sprintf(buffer, "acc: %5.2lf m/s2", length64(activeModule->acceleration64));
 #endif
             printToBitmap(programContext->renderingTarget, offset.x, offset.y, buffer, &programContext->font, fontSize, red);
             offset.y += fontSize;
@@ -2002,7 +2246,7 @@ extern "C" __declspec(dllexport) void renderDomainRoutine(){
 #if METHOD_32
             sprintf(buffer, "vel: %5.2f m/s", length(activeModule->velocity32));
 #elif METHOD_64
-            sprintf(buffer, "vel: %5.2lf m/s", length(activeModule->velocity64));
+            sprintf(buffer, "vel: %5.2lf m/s", length64(activeModule->velocity64));
 #endif
             printToBitmap(programContext->renderingTarget, offset.x, offset.y, buffer, &programContext->font, fontSize);
             offset.y += fontSize;

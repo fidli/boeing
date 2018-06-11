@@ -177,8 +177,50 @@ void mpu6050_acc16_float32(const MPU6050Settings setting, const int16 x, const i
     *result_z = attun * z;
 }
 
+void mpu6050_acc16_float64(const MPU6050Settings setting, const int16 x, const int16 y, const int16 z, float64 * result_x, float64 * result_y,float64 * result_z){
+    float64 attun;
+    switch(setting.accPrecision){
+        case AccPrecision_2:{
+            attun = 1.0f / 16384; 
+        }break;
+        case AccPrecision_4:{
+            attun = 1.0f / 8192;
+        }break;
+        case AccPrecision_8:{
+            attun = 1.0f / 4096;
+        }break;
+        case AccPrecision_16:{
+            attun = 1.0f / 2048;
+        }break;
+    }
+    *result_x = attun * x;
+    *result_y = attun * y;
+    *result_z = attun * z;
+}
+
 void mpu6050_acc32_float32(const MPU6050Settings setting, const int32 x, const int32 y, const int32 z, float32 * result_x, float32 * result_y,float32 * result_z){
     float32 attun;
+    switch(setting.accPrecision){
+        case AccPrecision_2:{
+            attun = 1.0f / 16384; 
+        }break;
+        case AccPrecision_4:{
+            attun = 1.0f / 8192;
+        }break;
+        case AccPrecision_8:{
+            attun = 1.0f / 4096;
+        }break;
+        case AccPrecision_16:{
+            attun = 1.0f / 2048;
+        }break;
+    }
+    *result_x = attun * x;
+    *result_y = attun * y;
+    *result_z = attun * z;
+}
+
+void mpu6050_acc32_float64(const MPU6050Settings setting, const int32 x, const int32 y, const int32 z, float64 * result_x, float64 * result_y,float64 * result_z){
+    float64 attun;
     switch(setting.accPrecision){
         case AccPrecision_2:{
             attun = 1.0f / 16384; 
@@ -220,6 +262,28 @@ void mpu6050_gyro16_float32(const MPU6050Settings setting, const int16 x, const 
     *result_z = attun * z;
 }
 
+void mpu6050_gyro16_float64(const MPU6050Settings setting, const int16 x, const int16 y, const int16 z, float64 * result_x, float64 * result_y, float64 * result_z){
+    float64 attun;
+    switch(setting.gyroPrecision){
+        case GyroPrecision_250:{
+            attun = 1.0f / 131; 
+        }break;
+        case GyroPrecision_500:{
+            attun = 1.0f / 65.5f;
+        }break;
+        case GyroPrecision_1000:{
+            attun = 1.0f / 32.8f;
+        }break;
+        case GyroPrecision_2000:{
+            attun = 1.0f / 16.4f;
+        }break;
+    }
+    *result_x = attun * x;
+    *result_y = attun * y;
+    *result_z = attun * z;
+}
+
+
 void mpu6050_gyro32_float32(const MPU6050Settings setting, const int32 x, const int32 y, const int32 z, float32 * result_x, float32 * result_y, float32 * result_z){
     float32 attun;
     switch(setting.gyroPrecision){
@@ -241,8 +305,33 @@ void mpu6050_gyro32_float32(const MPU6050Settings setting, const int32 x, const 
     *result_z = attun * z;
 }
 
+void mpu6050_gyro32_float64(const MPU6050Settings setting, const int32 x, const int32 y, const int32 z, float64 * result_x, float64 * result_y, float64 * result_z){
+    float64 attun;
+    switch(setting.gyroPrecision){
+        case GyroPrecision_250:{
+            attun = 1.0f / 131; 
+        }break;
+        case GyroPrecision_500:{
+            attun = 1.0f / 65.5f;
+        }break;
+        case GyroPrecision_1000:{
+            attun = 1.0f / 32.8f;
+        }break;
+        case GyroPrecision_2000:{
+            attun = 1.0f / 16.4f;
+        }break;
+    }
+    *result_x = attun * x;
+    *result_y = attun * y;
+    *result_z = attun * z;
+}
+
 
 float32 mpu6050_getTimeDelta(const uint16 sampleRate){
+    return 1.0f / sampleRate;
+}
+
+float64 mpu6050_getTimeDelta64(const uint16 sampleRate){
     return 1.0f / sampleRate;
 }
 
