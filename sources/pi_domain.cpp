@@ -156,7 +156,7 @@ static bool connectToServer(){
                 sleep(1);
             }
             
-            domainState->xbFreq = xbs2settings.init.beacon.frequency;
+            domainState->xbFreq = xbs2settings.init.beacon.frequencyKhz;
             strncpy(domainState->channel, xbs2settings.init.beacon.channel, 3);
             strncpy(domainState->pan, xbs2settings.init.beacon.pan, 5);
             

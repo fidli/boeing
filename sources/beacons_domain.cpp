@@ -121,11 +121,13 @@ static bool connectToServer(){
         return false;
     }
     
+    LOG("PRE error: %d", WSAGetLastError());
     LOG("connecting to server");
     if(!tcpConnect(&state->beaconsSocket, state->ip, state->port)){
         LOG("connecting to server failed %d", WSAGetLastError());
         return false;
     }
+    LOG("POST error: %d", WSAGetLastError());
     
     LOG("connection successfull. Sending handshake message");
     
@@ -133,7 +135,7 @@ static bool connectToServer(){
     
     handshake.type = MessageType_Init;
     handshake.init.clientType = ClientType_Beacon;
-    handshake.init.beacon.frequency = state->coordinator->frequency;
+    handshake.init.beacon.frequencyKhz = state->coordinator->frequency;
     handshake.init.beacon.timeDivisor = getTickDivisor();
     strncpy(handshake.init.beacon.channel, state->coordinator->channel, 3);
     strncpy(handshake.init.beacon.pan, state->coordinator->pan, 5);

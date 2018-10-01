@@ -44,7 +44,7 @@ extern "C"{
 
 #include "servercode_common.h"
 
-#define sleep(n) Sleep((n)*1000000);
+#define sleep(n) Sleep((n)*1000);
 
 #include "util_mem.h"
 
@@ -68,6 +68,13 @@ extern "C"{
 
 #include "server_input.h"
 
+#include "util_physics.cpp"
+
+#define METHOD_32 0
+#define METHOD_64 1
+#define METHOD_XBSP 1
+#define METHOD_MBPNG 0
+
 
 union MemsData{
     struct{
@@ -90,7 +97,9 @@ union MemsData{
 };
 
 struct XbData{
+#if METHOD_XBSP
     int64 delay[4];
+    #endif
 };
 
 
@@ -104,8 +113,6 @@ enum LocalisationType{
     LocalisationTypeCount
 };
 
-#define METHOD_32 0
-#define METHOD_64 1
 
 struct ProgramContext : Common{
     bool inited;
@@ -193,13 +200,17 @@ struct ProgramContext : Common{
         v3_64 accelerationBias64;
         v3_64 accelerationBiasUpper64;
 #endif
-        
         uint32 physicalFrame;
+        
+#if METHOD_XBSP
         uint32 xbFrame;
+        float32 xbPeriod;        
+#endif
+        
         char memsDataBuffer[4096];
         char xbDataBuffer[4096];
         
-        float32 xbPeriod;
+        
         
         Message lastMemsMessage;
         
@@ -212,7 +223,7 @@ struct ProgramContext : Common{
     } modules[2];
     
     struct Beacon{
-        uint16 frequency;
+        uint16 frequencyKhz;
         uint64 timeDivisor;
         char channel[4];
         char pan[5];
@@ -713,7 +724,7 @@ extern "C" __declspec(dllexport) void serverDomainRoutine(){
                     Message handshake;
                     handshake.type = MessageType_Init;
                     handshake.init.clientType = ClientType_Beacon;
-                    handshake.init.beacon.frequency = aBeacon->frequency;
+                    handshake.init.beacon.frequencyKhz = aBeacon->frequencyKhz;
                     strncpy(handshake.init.beacon.channel, aBeacon->channel, 3);
                     strncpy(handshake.init.beacon.pan, aBeacon->pan, 5);
                     
@@ -763,7 +774,7 @@ extern "C" __declspec(dllexport) void serverDomainRoutine(){
                         
                         strncpy(beacon->channel, wrap->init.beacon.channel, 3);
                         strncpy(beacon->pan, wrap->init.beacon.pan, 5);
-                        beacon->frequency = wrap->init.beacon.frequency;
+                        beacon->frequencyKhz = wrap->init.beacon.frequencyKhz;
                         beacon->timeDivisor = wrap->init.beacon.timeDivisor;
                     }
                     programContext->beaconsSocket = socket;
@@ -957,7 +968,7 @@ extern "C" __declspec(dllexport) void initDomainRoutine(void * memoryStart, Imag
             //frequency
             uint16 kHz;
             result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%hu", &kHz) == 1;
-            programContext->beacons[0].frequency = programContext->beacons[1].frequency = programContext->beacons[2].frequency = programContext->beacons[3].frequency = kHz;
+            programContext->beacons[0].frequencyKhz = programContext->beacons[1].frequencyKhz = programContext->beacons[2].frequencyKhz = programContext->beacons[3].frequencyKhz = kHz;
             
             for(uint8 moduleIndex = 0; moduleIndex < 2; moduleIndex++){
                 ProgramContext::Module * module = &programContext->modules[moduleIndex];
@@ -1182,7 +1193,7 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
         offset += linelen;
 #endif
         //frequency kHz
-        snprintf(line, linesize, "%hu\r\n", programContext->beacons[0].frequency);
+        snprintf(line, linesize, "%hu\r\n", programContext->beacons[0].frequencyKhz);
         linelen = strlen(line);
         strncpy(contents.contents + offset, line, linelen);
         offset += linelen;
@@ -1400,9 +1411,8 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
                     programContext->accumulator = 0;
                     programContext->restartReplay = false;
                     Sleep(100);
-                    return;
                 }
-               
+                return;               
             }else{
                 Sleep(500);
             }
@@ -1745,15 +1755,16 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
                 
             }
         }
-        if(stepsAmount == 0){
+        if(programContext->restartReplay || stepsAmount == 0){
             if(programContext->replay){
                 for(uint32 i = 0; i < ARRAYSIZE(programContext->modules); i++){
                     //reset
                     resetModule(i);
                     programContext->accumulator = 0;
+                    programContext->restartReplay = false;
                     Sleep(100);
-                    return;
                 }
+                return;               
             }else{
                 Sleep(500);
             }
@@ -1770,9 +1781,9 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
                     int32 size = ARRAYSIZE(module->xbData);
                     XbData * data;
                     if(programContext->replay){
-                        data = &programContext->recordData.data[i].xb[programContext->recordData.data[i].recordDataXbIndex];
+                        data = &programContext->recordData.data[i].xb[programContext->recordData.data[i].recordDataXbIndex+stepIndex];
                     }else{
-                        data = &module->xbData[module->xbTailIndex];
+                            data = &module->xbData[(module->xbTailIndex+stepIndex)%ARRAYSIZE(module->xbData)];
                     }
                         maxTiming  = MAX(translateTickToTime(data->delay[0], programContext->beacons[0].timeDivisor), maxTiming);
                     for(uint8 ti = 1; ti < ARRAYSIZE(XbData::delay); ti++){
@@ -1796,11 +1807,30 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
                 ProgramContext::Module * module = &programContext->modules[i];
                 if(module->run){
                     for(uint16 stepIndex = 0; stepIndex < stepsToTake; stepIndex++){
+                        XbData * data;
+                        if(programContext->replay){
+                            data = &programContext->recordData.data[i].xb[programContext->recordData.data[i].recordDataXbIndex++];
+                        }else{
+                            data = &module->xbData[module->xbTailIndex];
+                        }
                         //do stuff
+                        #if METHOD_32
+                        #elif METHOD_64
+                        for(uint8 beaconIndex = 0; beaconIndex < 4; beaconIndex++){
+                            float64 timing = translateTickToTime(data->delay[beaconIndex], programContext->beacons[beaconIndex].timeDivisor);
+                            float64 timeDelta = timing - module->xbPeriod;
+                            float64 c = 300000000.0f;
+                            float64 difference = c*timeDelta;
+                            programContext->beacons[beaconIndex].moduleDistance64[i] += difference;
+                            //NOTE(AK): superposition principle, the time delta should be as low as possible to consider this a linear step
+                            v3_64 direction = module->worldPosition64 - programContext->beacons[beaconIndex].worldPosition64;
+                            module->worldPosition64 += difference * normalize64(direction);
+                        }
+                        #endif
+                        if(!programContext->replay) module->xbTailIndex = (module->xbTailIndex + 1) % ARRAYSIZE(module->xbData);
+                        module->xbFrame++;
                     }
-                    if(programContext->replay){
-                        programContext->recordData.data[i].recordDataXbIndex++;
-                    }else{
+                    if(!programContext->replay){
                     FETCH_AND_ADD(&module->xbStepsAvailable, -stepsToTake);
                     }
                 }

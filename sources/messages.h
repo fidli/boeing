@@ -37,7 +37,7 @@ struct Message{
                     float32 xbPeriod;
                 } boeing;
                 struct {
-                    uint16 frequency;
+                    uint16 frequencyKhz;
                     char channel[3];
                     char pan[5];
                     char sidLower[4][9];
