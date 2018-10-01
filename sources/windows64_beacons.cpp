@@ -98,21 +98,40 @@ static inline DWORD jettisonAllPrivileges() {
 
 #include "windows_dll.cpp"
 
+#include "algorithms.h"
+
 struct Context{
     HINSTANCE hInstance;
+    
+#if METHOD_XBSP
     Thread beaconThread[4];
-    bool freeze;
     bool beaconRunning[4];
+#endif
+    
+#if METHOD_XBPNG
+    Thread pingThread;
+    bool pingRunning;
+#endif
+    
+    bool freeze;
     Common common;
 };
 
 Context * context;
 
+#if METHOD_XBSP
 DEFINEDLLFUNC(void, beaconDomainRoutine, int);
+#endif
+
+#if METHOD_XBPNG
+DEFINEDLLFUNC(void, pingDomainRoutine, void);
+#endif
+
 DEFINEDLLFUNC(void, initDomainRoutine, void *);
 DEFINEDLLFUNC(void, iterateDomainRoutine, void);
 
 
+#if METHOD_XBSP
 static void beaconPlatform(int index){
     while(context->common.keepRunning){
         if(!context->freeze && beaconDomainRoutine != NULL){
@@ -124,6 +143,21 @@ static void beaconPlatform(int index){
         }
     }
 }
+#endif
+
+#if METHOD_XBPNG
+static void beaconPlatformPing(){
+    while(context->common.keepRunning){
+        if(!context->freeze && beaconDomainRoutine != NULL){
+            context->pingRunning = true;
+            pingDomainRoutine();
+            context->pingRunning = false;
+        }else{
+            Sleep(1000);
+        }
+    }
+}
+#endif
 
 void customWait(){
     print("froze \n");
@@ -180,9 +214,17 @@ static inline int main(LPWSTR * argvW, int argc) {
     
     bool threadResult = true;
     
+    
+#if METHOD_XBSP
     for(uint8 i = 0; i < ARRAYSIZE(context->beaconThread); i++){
         threadResult &= createThread(&context->beaconThread[i], (void (*)(void *))beaconPlatform, (void *) i);
     }
+#endif
+    
+    
+#if METHOD_XBPNG
+    threadResult &= createThread(&context->pingThread, (void (*)(void *))beaconPlatformPing, void);
+#endif
     
     HMODULE beaconsLibrary = 0;
     
@@ -196,7 +238,12 @@ static inline int main(LPWSTR * argvW, int argc) {
         while(context->common.keepRunning){
             
             if(hasDllChangedAndReloaded(&beaconsCode, &beaconsLibrary, customWait)){
+#if METHOD_XBSP
                 OBTAINDLLFUNC(beaconsLibrary, beaconDomainRoutine);
+#endif
+#if METHOD_XBPNG
+                OBTAINDLLFUNC(beaconsLibrary, pingDomainRoutine);
+#endif
                 OBTAINDLLFUNC(beaconsLibrary, initDomainRoutine);
                 OBTAINDLLFUNC(beaconsLibrary, iterateDomainRoutine);
                 
@@ -205,7 +252,12 @@ static inline int main(LPWSTR * argvW, int argc) {
                 if(beaconsLibrary == NULL){
                     initDomainRoutine = NULL;
                     iterateDomainRoutine = NULL;
+#if METHOD_XBSP
                     beaconDomainRoutine = NULL;
+#endif
+#if METHOD_XBPNG
+                    pingDomainRoutine = null;
+#endif
                 }else{
                     if(initDomainRoutine){
                         initDomainRoutine(domainMemory);

@@ -56,18 +56,34 @@ extern "C"{
 LocalTime lt;
 char logbuffer[1024];
 #define LOG(message,...)  lt = getLocalTime(); sprintf(logbuffer, "[%02hu.%02hu.%04hu %02hu:%02hu:%02hu] %900s\r\n", lt.day, lt.month, lt.year, lt.hour, lt.minute, lt.second, (message)); printf(logbuffer, __VA_ARGS__);
+#include "algorithms.h"
 
 struct State : Common{
     XBS2Handle * coordinator;
     
-    struct{
+    struct Beacon{
         XBS2Handle serial; //31 bytes
+        
+#if METHOD_XBSP
         uint64 tick[2];
         int64 fifoData[2][4*2000];
         int16 head[2];
         int16 tail[2];
         uint16 fifoCount[2];
+#endif
+#if METHOD_XBPNG
+        struct CalibrationData{
+            uint64 ticks[100][4];
+            bool calibrated;
+        } calibration[2];
+#endif
     } beacons[4];
+    
+#if METHOD_XBPNG
+    uint8 currentBeacon;
+    uint32 serverMessageAccumulatedSize;
+    Message serverMessage;
+#endif
     
     char sendBuffer[60000];
     
@@ -183,6 +199,13 @@ extern "C" __declspec(dllexport) void initDomainRoutine(void * platformMemory){
             ASSERT(false);
         }
         
+#if METHOD_XBPNG
+        for(uint8 moduleIndex = 0; moduleIndex < ARRAYSIZE(state->calibration); moduleIndex++){
+            state->calibration[moduleIndex].calibrated = false;
+        }
+        state->currentBeacon = 0;
+        state->serverMessageAccumulatedSize = 0;
+#endif
 #if 1
         LOG("initing network");
         for(uint8 serialIndex = 0; serialIndex < ARRAYSIZE(state->coms); serialIndex++){
@@ -197,7 +220,12 @@ extern "C" __declspec(dllexport) void initDomainRoutine(void * platformMemory){
                 if(xbs2_detectAndSetStandardBaudRate(beacon)){
                     LOG("baudrate detected %u", beacon->baudrate);
                     LOG("initing module");
-                    while(!xbs2_initModule(beacon)){
+                    XBS2InitSettings settings;
+                    settings.prepareForBroadcast = true;
+#if METHOD_XBPNG
+                    settings.prepareForBroadcast = false;
+#endif
+                    while(!xbs2_initModule(beacon, &settings)){
                         LOG("failed to init module");
                         wait(10);
                         LOG("retrying");
@@ -254,6 +282,16 @@ extern "C" __declspec(dllexport) void initDomainRoutine(void * platformMemory){
     inited = true;
 }
 
+#if METHOD_XBPNG
+extern "C" __declspec(dllexport) void pingDomainRoutine(){
+    if(!inited || !state->inited) return;
+    //1) timestamp
+    //2) unicast ping message
+    //3) await reply, timestamp and go to next beacon
+}
+#endif
+
+#if METHOD_XBSP
 extern "C" __declspec(dllexport) void beaconDomainRoutine(int index){
     if(!inited || !state->inited) return;
     //poll the xbs
@@ -274,6 +312,7 @@ extern "C" __declspec(dllexport) void beaconDomainRoutine(int index){
         //printf("[%d][%f] no response for 3 seconds\n", index, getProcessCurrentTime());
     }
 }
+#endif
 
 static void sendAndReconnect(const NetSendSource * source){
     NetResultType result;
@@ -288,6 +327,93 @@ static void sendAndReconnect(const NetSendSource * source){
 
 extern "C" __declspec(dllexport) void iterateDomainRoutine(){
     if(!inited || !state->inited) return;
+#if METHOD_XBPNG
+    //checking for calibration message
+    NetRecvResult result;
+    result.bufferLength = sizeof(Message);
+    Message * message = &state->serverMessage;
+    result.buffer = (char*)message;
+    NetResultType resultCode;
+    do{
+        result.bufferLength = sizeof(Message) - state->serverMessageAccumulatedSize;
+        result.buffer = ((char *) message) + state->serverMessageAccumulatedSize;
+        resultCode = netRecv(&socket, &result);
+        state->serverMessageAccumulatedSize += result.resultLength;
+        if(programContext->newClientAccumulatedSize == sizeof(Message)){
+            if(message->type == MessageType_Calibrate){
+                LOG("Got calibration message, calibration samples %u, target %s", message->calibrate.sampleCount, message->calibrate.sidLower);
+                state->calibration[message->calibrate.id].calibrated = false;
+                for(uint32 sampleIndex = 0; sampleIndex < message->calibrate.sampleCount; sampleIndex++){
+                    for(uint8 beaconIndex = 0; beaconIndex < ARRAYSIZE(state->beacons); beaconIndex++){
+                        Beacon * beacon = &state->beacons[beaconIndex];
+                        
+                        LOG("Pinging from %s to %s. Module id: %hhu", beacon->serial.sidLower, message->calibrate.sidLower, message->calibrate.id);
+                        LOG("Announcing ping process");
+                        while(!xbs2_changeAddress(&beacon->serial, message->calibrate.sidLower)){
+                            LOG("Failed to change XB address");
+                            sleep(1);
+                        }
+                        LOG("Addres changed.");
+                        LOG("Clearing pipe");
+                        while(!clearSerialPort(&beacon->serial));
+                        char msg[10];
+                        sprintf(msg, "%s\r", beacon->serial.sidLower);
+                        LOG("Transmitting message: '%s'", msg);
+                        while(!xbs2_transmitMessage(&beacon->serial, msg)){
+                            LOG("Failed to transmit message");
+                            sleep(1);
+                        }
+                        LOG("Awaiting ACK. 1 seconds timeout");
+                        char response[2] = {'-', 0};
+                        //@Robustness we are not checking the respondent address, this could be anyone talking :/ lets use module id as the message and assume, that everyone else is silent
+                        waitforAnyByte(&beacon->serial, response, 1);
+                        uint64 totalTicks;
+                        if(response[0] != message->calibrate.id){
+                            LOG("Response is not valid, sample failed");
+                            totalTicks = 0;
+                        }else{
+                            LOG("Sending actual ping. Logging silence.");
+                            response[0] = '-';
+                            uint64 startTick = getTick();
+                            xbs2_transmitByteQuick(&beacon->serial, message->calibrate.id);
+                            waitforAnyByte(&beacon->serial, response, 1);
+                            if(response[0] == message->calibrate.id){
+                                totalTicks = getTick() - startTick();
+                                LOG("Got ping. Ticks elapsed: %llu", totalTicks);
+                            }else{
+                                LOG("Ping timed out. sample failed");
+                                totalTicks = 0;
+                            }
+                            
+                        }
+                        beacon->calibration[message->calibrate.id].ticks[sampleIndex][beaconIndex] = totalTicks;
+                    }
+                    
+                }
+                Message calibrationReportHeader;
+                calibrationReportHeader.type = MessageType_Calibrate;
+                calibrationReportHeader.calibrate.sampleCount = message->calibrate.sampleCount;
+                
+                NetSendSource source;
+                source.bufferLength = sizeof(Message);
+                source.buffer = (char*)&calibrationReportHeader;
+                sendAndReconnect(&source);
+                
+                //4 beacons, 1 tick each, tick is size of uint64
+                source.bufferLength = message->calibrate.sampleCount * sizeof(uint64) * 4;
+                source.buffer = &state->calibration[message->calibrate.id].data;
+                
+                sendAndReconnect(&source);
+                
+                state->calibration[message->calibrate.id].calibrated = true;
+            }
+            state->serverMessageAccumulatedSize = 0;
+        }while(resultCode == NetResultType_Ok && state->serverMessageAccumulatedSize != 0);
+    }
+    
+#endif
+    
+#if METHOD_XBSP
     //forward to server
     for(uint8 boeingIndex = 0; boeingIndex < 2; boeingIndex++){
         uint16 count = -1;
@@ -344,7 +470,7 @@ extern "C" __declspec(dllexport) void iterateDomainRoutine(){
             Sleep(1000);
         }
     }
-    
+#endif
     
 }
 

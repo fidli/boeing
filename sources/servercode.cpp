@@ -70,11 +70,7 @@ extern "C"{
 
 #include "util_physics.cpp"
 
-#define METHOD_32 0
-#define METHOD_64 1
-#define METHOD_XBSP 1
-#define METHOD_MBPNG 0
-
+#include "algorithms.h"
 
 union MemsData{
     struct{

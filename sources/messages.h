@@ -17,6 +17,7 @@ enum MessageType{
     MessageType_Init,
     MessageType_Reset,
     MessageType_Data,
+    MessageType_Calibrate,
     
     MessageTypeCount
 };
@@ -43,9 +44,15 @@ struct Message{
                     char sidLower[4][9];
                     uint64 timeDivisor;
                 } beacon;
+                
             };
             
         } init;
+        struct {
+            uint32 sampleCount;
+            char sidLower[9];
+            char id;
+        } calibrate;
         struct {
             uint32 length;
             uint8 boeingId;

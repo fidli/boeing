@@ -5,6 +5,10 @@
 
 #include "util_serial.h"
 
+struct XBS2InitSettings{
+    bool prepareForBroadcast;
+};
+
 struct XBS2Handle : SerialHandle{
     char sidLower[9];
     float32 guardTime;
@@ -137,6 +141,19 @@ void xbs2_transmitByteQuick(XBS2Handle * source, const char byteContents){
     xbs2_sendByteQuick(source, byteContents);
 }
 
+bool xbs2_changeAddress(XBS2Handle * source, const char * lowerAddress){
+    if(xbs2_enterCommandMode(source)){
+        char buff[14];
+        sprintf(buff, "ATDL%8s\r", lowerAddress);
+        char result[20];
+        if((xbs2_sendMessage(source, buff)  && waitForAnyMessage(source, result) > 0 && !strncmp("0K\r", result, 3))){
+            return xbs2_exitCommandMode(source);
+        }
+    }
+    xbs2_exitCommandModeQuick(source);
+    return false;
+    
+}
 
 void xbs2_changeAddressQuick(XBS2Handle * source, const char * lowerAddress){
     xbs2_enterCommandModeQuick(source);
@@ -296,7 +313,7 @@ bool xbs2_readValues(XBS2Handle * module){
     }
 }
 
-bool xbs2_initModule(XBS2Handle * module){
+bool xbs2_initModule(XBS2Handle * module, XBS2InitSettings * settings){
     
     module->guardTime = 1.1f;
     char result[70] = {};
@@ -341,24 +358,21 @@ bool xbs2_initModule(XBS2Handle * module){
             
             
             
-            
-            //broadcast destination address, SH is 0, which is default
-            success = success && xbs2_sendMessage(module, "ATDLFFFF\r") && waitForAnyMessage(module, result) > 0 && !strncmp("OK\r", result, 3);
+            if(settings->prepareForBroadcast){
+                //broadcast destination address, SH is 0, which is default
+                success = success && xbs2_sendMessage(module, "ATDLFFFF\r") && waitForAnyMessage(module, result) > 0 && !strncmp("OK\r", result, 3);
+            }else{
+                //carousel/unicast
+                //destination high is constant, at least in this case
+                success = success && xbs2_sendMessage(module, "ATDH13A200\r") && waitForAnyMessage(module, result) > 0 && !strncmp("OK\r", result, 3);
+                
+            }
             
             /*
                         //api addresing - cluster
                         success = success && xbs2_sendMessage(module, "ATZA1\r") && waitForAnyMessage(module, result) > 0 && !strncmp("OK\r", result, 3);
                         */
             
-            //carousel/unicast
-            /*
-            //destination high is constant, at least in this case
-            success = success && xbs2_sendMessage(module, "ATDH13A200\r") && waitForAnyMessage(module, result) > 0 && !strncmp("OK\r", result, 3);
-            
-            /*
-            //unicast
-            success = success && xbs2_sendMessage(module, "ATDL400A3F4C\r") && waitForAnyMessage(module, result) > 0 && !strncmp("OK\r", result, 3);
-            */
             
             /*
             //3ms guard time lesser is hardly achievable, sometimes it does not work

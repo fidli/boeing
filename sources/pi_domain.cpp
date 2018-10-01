@@ -29,6 +29,12 @@
 
 #include "boeing_common.h"
 
+LocalTime lt;
+char logbuffer[1024];
+#define LOG(message,...)  lt = getLocalTime(); sprintf(logbuffer, "[%02hu.%02hu.%04hu %02hu:%02hu:%02hu] %900s\r\n", lt.day, lt.month, lt.year, lt.hour, lt.minute, lt.second, (message)); printf(logbuffer, __VA_ARGS__);
+
+#include "algorithms.h"
+
 struct DomainState : Common{
     MPU6050Handle memsHandle;
     byte fifoData[4092];
@@ -76,7 +82,38 @@ extern "C" void pumpXbDomainRoutine(){
         printf("xb pump unhalted\n");
         domainState->xbPumpHalted = false;
     }
-    
+#if METHOD_XBPNG
+    char xbRecvBuffer[64];
+    //awaiting 8 chars
+    int32 res = waitForAnyMessage(&domainState->xb, xbRecvBuffer, 3);
+    xbRecvBuffer[res] = 0;
+    if(res == 8){
+        LOG("Got ping announcement from %s", xbRecvBuffer);
+        LOG("Flushing pipe");
+        while(!clearSerialPort(&beacon->serial));
+        while(!xbs2_changeAddress(&domainState->xb, xbRecvBuffer)){
+            LOG("Failed to change XB address");
+            sleep(1);
+        }
+        LOG("Sending ACK, then entering logging silence and waiting for ping");
+        while(!xbs2_transmitByte(&domainState->xb, domainState->id)){
+            LOG("Failed to transmit ACK");
+            sleep(1);
+        }
+        
+        char ping;
+        //awaiting 1 char
+        if(waitForAnyByte(&domainState->xb, &ping, 3)){
+            while(!xbs2_transmitByteQuick(&domainState->xb, ping)));
+        }else{
+            LOG("Failed to optain ping message. timeout");
+        }
+        
+    }else{
+        LOG("Got only %d characters: %s", xbRecvBuffer);
+    }
+#endif
+#if METHOD_XPSP
     
     //address is set to broadcast, just pump with constant pace
     
@@ -93,12 +130,12 @@ extern "C" void pumpXbDomainRoutine(){
     /*
     //carousel 
     for(uint8 i = 0; i < ARRAYSIZE(domainState->beaconSids); i++){
-        //float32 start = getProcessCurrentTime();
-        xbs2_changeAddressQuick(&domainState->xb, domainState->beaconSids[i]);
-        //printf("[%d] change address time taken: %f\n", i, getProcessCurrentTime() - start);
-        xbs2_transmitByteQuick(&domainState->xb, domainState->id);
+    //float32 start = getProcessCurrentTime();
+    xbs2_changeAddressQuick(&domainState->xb, domainState->beaconSids[i]);
+    //printf("[%d] change address time taken: %f\n", i, getProcessCurrentTime() - start);
+    xbs2_transmitByteQuick(&domainState->xb, domainState->id);
     }*/
-    
+#endif
     
 }
 
@@ -387,7 +424,12 @@ extern "C" void initDomainRoutine(void * memoryStart){
         }
         printf("baud rate detected: %d\n", domainState->xb.baudrate);
         printf("initing module\n");
-        if(!xbs2_initModule(&domainState->xb)){
+        XBS2InitSettings settings;
+        settings.prepareForBroadcast = true;
+#if METHOD_XBPNG
+        settings.prepareForBroadcast = false;
+#endif
+        if(!xbs2_initModule(&domainState->xb, &settings)){
             printf("falied to init xb module\n");
             closeHandle(&domainState->xb);
             return;
