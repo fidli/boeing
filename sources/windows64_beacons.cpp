@@ -148,7 +148,7 @@ static void beaconPlatform(int index){
 #if METHOD_XBPNG
 static void beaconPlatformPing(){
     while(context->common.keepRunning){
-        if(!context->freeze && beaconDomainRoutine != NULL){
+        if(!context->freeze && pingDomainRoutine != NULL){
             context->pingRunning = true;
             pingDomainRoutine();
             context->pingRunning = false;
@@ -162,9 +162,14 @@ static void beaconPlatformPing(){
 void customWait(){
     print("froze \n");
     context->freeze = true;
+#if METHOD_XBSP
     for(uint8 i = 0; i < ARRAYSIZE(context->beaconThread); i++){
         while(context->beaconRunning[i]);
     }
+#endif
+#if METHOD_XBPNG
+    while(context->pingRunning);
+#endif
     print("wait ready\n");
 }
 
@@ -223,7 +228,7 @@ static inline int main(LPWSTR * argvW, int argc) {
     
     
 #if METHOD_XBPNG
-    threadResult &= createThread(&context->pingThread, (void (*)(void *))beaconPlatformPing, void);
+    threadResult &= createThread(&context->pingThread, (void (*)(void *))beaconPlatformPing, (void *) NULL);
 #endif
     
     HMODULE beaconsLibrary = 0;
@@ -256,7 +261,7 @@ static inline int main(LPWSTR * argvW, int argc) {
                     beaconDomainRoutine = NULL;
 #endif
 #if METHOD_XBPNG
-                    pingDomainRoutine = null;
+                    pingDomainRoutine = NULL;
 #endif
                 }else{
                     if(initDomainRoutine){
@@ -277,10 +282,14 @@ static inline int main(LPWSTR * argvW, int argc) {
     }
     
     closeSocket(&context->common.beaconsSocket);
-    
+#if METHOD_XBSP
     for(uint8 i = 0; i < ARRAYSIZE(context->beaconThread); i++){
         joinThread(&context->beaconThread[i]);
     }
+#endif
+#if METHOD_XBPNG
+    joinThread(&context->pingThread);
+#endif
     
     if (!VirtualFree(memoryStart, 0, MEM_RELEASE)) {
         //more like log it

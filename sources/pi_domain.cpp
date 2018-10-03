@@ -29,9 +29,6 @@
 
 #include "boeing_common.h"
 
-LocalTime lt;
-char logbuffer[1024];
-#define LOG(message,...)  lt = getLocalTime(); sprintf(logbuffer, "[%02hu.%02hu.%04hu %02hu:%02hu:%02hu] %900s\r\n", lt.day, lt.month, lt.year, lt.hour, lt.minute, lt.second, (message)); printf(logbuffer, __VA_ARGS__);
 
 #include "algorithms.h"
 
@@ -75,6 +72,41 @@ const char * configPath = "data/boeing.config";
 extern "C" void pumpXbDomainRoutine(){
     if(!inited || !domainState->inited) return;
     
+    
+#if METHOD_XBPNG
+    char xbRecvBuffer[64];
+    //awaiting 9 chars (address + '\r')
+    int32 res = xbs2_waitForAnyMessage(&domainState->xb, xbRecvBuffer, ARRAYSIZE(xbRecvBuffer), 3);
+    xbRecvBuffer[8] = 0;
+    if(res == 9){
+        printf("Got ping announcement from %s\n", xbRecvBuffer);
+        printf("Flushing pipe\n");
+        while(!clearSerialPort(&domainState->xb));
+        while(!xbs2_changeAddress(&domainState->xb, xbRecvBuffer)){
+            printf("Failed to change XB address\n");
+            sleep(1);
+        }
+        printf("Sending ACK, then entering logging silence and waiting for ping\n");
+        while(!xbs2_transmitByte(&domainState->xb, domainState->id)){
+            printf("Failed to transmit ACK\n");
+            sleep(1);
+        }
+        char ping;
+        //awaiting 1 char
+        if(xbs2_waitForAnyByte(&domainState->xb, &ping, 3)){
+            while(!xbs2_transmitByte(&domainState->xb, ping));
+            printf("Got ping message '%c', replied ping '%c'\n", ping, ping);
+        }else{
+            printf("Failed to optain ping message. timeout\n");
+        }
+        
+    }else if (res != 0){
+        printf("Got only %d characters: %s\n", res, xbRecvBuffer);
+    }
+    //else is ok, there is no ping request
+#endif
+#if METHOD_XPSP
+    
     if(domainState->haltMemsPolling){
         domainState->xbPumpHalted = true;
         printf("xb pump halted\n");
@@ -82,39 +114,6 @@ extern "C" void pumpXbDomainRoutine(){
         printf("xb pump unhalted\n");
         domainState->xbPumpHalted = false;
     }
-#if METHOD_XBPNG
-    char xbRecvBuffer[64];
-    //awaiting 8 chars
-    int32 res = waitForAnyMessage(&domainState->xb, xbRecvBuffer, 3);
-    xbRecvBuffer[res] = 0;
-    if(res == 8){
-        LOG("Got ping announcement from %s", xbRecvBuffer);
-        LOG("Flushing pipe");
-        while(!clearSerialPort(&beacon->serial));
-        while(!xbs2_changeAddress(&domainState->xb, xbRecvBuffer)){
-            LOG("Failed to change XB address");
-            sleep(1);
-        }
-        LOG("Sending ACK, then entering logging silence and waiting for ping");
-        while(!xbs2_transmitByte(&domainState->xb, domainState->id)){
-            LOG("Failed to transmit ACK");
-            sleep(1);
-        }
-        
-        char ping;
-        //awaiting 1 char
-        if(waitForAnyByte(&domainState->xb, &ping, 3)){
-            while(!xbs2_transmitByteQuick(&domainState->xb, ping)));
-        }else{
-            LOG("Failed to optain ping message. timeout");
-        }
-        
-    }else{
-        LOG("Got only %d characters: %s", xbRecvBuffer);
-    }
-#endif
-#if METHOD_XPSP
-    
     //address is set to broadcast, just pump with constant pace
     
     //wait(0.1f);
@@ -168,6 +167,8 @@ static bool connectToServer(){
     namasteMessage.type = MessageType_Init;
     namasteMessage.init.clientType = ClientType_Boeing;
     namasteMessage.init.boeing.xbPeriod = domainState->xbPeriod;
+    strncpy(namasteMessage.init.boeing.sidLower, domainState->xb.sidLower, 9);
+    //WTF, why not sizeof(Message)
     namaste.bufferLength = sizeof(namasteMessage.reserved) + sizeof(namasteMessage.init);
     namasteMessage.init.boeing.name = domainState->id;
     namasteMessage.init.boeing.settings = domainState->memsHandle.settings;
@@ -178,7 +179,7 @@ static bool connectToServer(){
             
             printf("init message sent\n");
             
-            printf("getting xbs2 settings\n");
+            printf("getting xbs2 settings from server\n");
             //accept christ blood and body in form of module settings
             Message xbs2settings;
             NetRecvResult result;
@@ -213,11 +214,20 @@ static bool connectToServer(){
             
             
             printf("success, channel %s, pan %s\n", domainState->xb.channel, domainState->xb.pan);
-            break;
             
-            
+            NetSendSource ready;
+            Message readyMessage;
+            readyMessage.type = MessageType_Ready;
+            readyMessage.ready.id = domainState->id;
+            ready.bufferLength = sizeof(Message);
+            ready.buffer = (char*) &readyMessage;
+            NetResultType subSubRes = netSend(&domainState->boeingSocket, &ready);
+            if(subSubRes == NetResultType_Ok || subSubRes == NetResultType_Closed){
+                break;
+            }
         }
     }
+    
     return true;
 }
 
@@ -243,7 +253,9 @@ extern "C" void softResetBoeing(){
     
     domainState->haltMemsPolling = true;
     while(!domainState->memsPollingHalted){}
+#if METHOD_XPSP
     while(!domainState->xbPumpHalted){}
+#endif
     
     NetSendSource reset;
     Message resetMessage;

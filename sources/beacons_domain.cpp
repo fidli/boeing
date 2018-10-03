@@ -71,15 +71,15 @@ struct State : Common{
         int16 tail[2];
         uint16 fifoCount[2];
 #endif
-#if METHOD_XBPNG
-        struct CalibrationData{
-            uint64 ticks[100][4];
-            bool calibrated;
-        } calibration[2];
-#endif
     } beacons[4];
     
 #if METHOD_XBPNG
+#if METHOD_XBPNG
+    struct CalibrationData{
+        uint64 ticks[100][4];
+        bool calibrated;
+    } calibration[2];
+#endif
     uint8 currentBeacon;
     uint32 serverMessageAccumulatedSize;
     Message serverMessage;
@@ -103,7 +103,11 @@ bool inited = false;
 const char * configPath = "data/beacons.config";
 
 
-
+int getModuleIndexByName(char name){
+    //'1' => 0
+    //'2' => 1 ...
+    return (int)(name - '1');
+}
 
 static bool parseConfig(const char * line){
     if(!strncmp("ip", line, 2)){
@@ -200,9 +204,12 @@ extern "C" __declspec(dllexport) void initDomainRoutine(void * platformMemory){
         }
         
 #if METHOD_XBPNG
+        //sanity check, is arraysize correctly implemented?
+        ASSERT(ARRAYSIZE(state->calibration) == 2);
         for(uint8 moduleIndex = 0; moduleIndex < ARRAYSIZE(state->calibration); moduleIndex++){
             state->calibration[moduleIndex].calibrated = false;
         }
+        
         state->currentBeacon = 0;
         state->serverMessageAccumulatedSize = 0;
 #endif
@@ -296,7 +303,7 @@ extern "C" __declspec(dllexport) void beaconDomainRoutine(int index){
     if(!inited || !state->inited) return;
     //poll the xbs
     char response;
-    int32 size = waitForAnyByte(&state->beacons[index].serial, &response, 3);
+    int32 size = xbs2_waitForAnyByte(&state->beacons[index].serial, &response, 3);
     if(size > 0){
         uint8 moduleId = response - '1'; 
         uint64 oldTick = state->beacons[index].tick[moduleId];
@@ -337,80 +344,92 @@ extern "C" __declspec(dllexport) void iterateDomainRoutine(){
     do{
         result.bufferLength = sizeof(Message) - state->serverMessageAccumulatedSize;
         result.buffer = ((char *) message) + state->serverMessageAccumulatedSize;
-        resultCode = netRecv(&socket, &result);
+        resultCode = netRecv(&state->beaconsSocket, &result);
         state->serverMessageAccumulatedSize += result.resultLength;
-        if(programContext->newClientAccumulatedSize == sizeof(Message)){
+        if(state->serverMessageAccumulatedSize == sizeof(Message)){
             if(message->type == MessageType_Calibrate){
+                int moduleIndex = getModuleIndexByName(message->calibrate.id);
+                
                 LOG("Got calibration message, calibration samples %u, target %s", message->calibrate.sampleCount, message->calibrate.sidLower);
-                state->calibration[message->calibrate.id].calibrated = false;
+                
+                state->calibration[moduleIndex].calibrated = false;
+                
+                
                 for(uint32 sampleIndex = 0; sampleIndex < message->calibrate.sampleCount; sampleIndex++){
                     for(uint8 beaconIndex = 0; beaconIndex < ARRAYSIZE(state->beacons); beaconIndex++){
-                        Beacon * beacon = &state->beacons[beaconIndex];
+                        State::Beacon * beacon = &state->beacons[beaconIndex];
                         
-                        LOG("Pinging from %s to %s. Module id: %hhu", beacon->serial.sidLower, message->calibrate.sidLower, message->calibrate.id);
+                        LOG("Pinging from %s to %s. Module id: %c", beacon->serial.sidLower, message->calibrate.sidLower, message->calibrate.id);
                         LOG("Announcing ping process");
                         while(!xbs2_changeAddress(&beacon->serial, message->calibrate.sidLower)){
                             LOG("Failed to change XB address");
-                            sleep(1);
+                            Sleep(1000);
                         }
                         LOG("Addres changed.");
                         LOG("Clearing pipe");
                         while(!clearSerialPort(&beacon->serial));
                         char msg[10];
                         sprintf(msg, "%s\r", beacon->serial.sidLower);
-                        LOG("Transmitting message: '%s'", msg);
+                        LOG("Transmitting message: '%s'", beacon->serial.sidLower);
                         while(!xbs2_transmitMessage(&beacon->serial, msg)){
                             LOG("Failed to transmit message");
-                            sleep(1);
+                            Sleep(1000);
                         }
-                        LOG("Awaiting ACK. 1 seconds timeout");
+                        LOG("Awaiting ACK. 3 seconds timeout");
                         char response[2] = {'-', 0};
                         //@Robustness we are not checking the respondent address, this could be anyone talking :/ lets use module id as the message and assume, that everyone else is silent
-                        waitforAnyByte(&beacon->serial, response, 1);
+                        xbs2_waitForAnyByte(&beacon->serial, response, 3);
                         uint64 totalTicks;
                         if(response[0] != message->calibrate.id){
-                            LOG("Response is not valid, sample failed");
+                            LOG("Response is not valid, sample failed, response is '%c'", response[0]);
                             totalTicks = 0;
                         }else{
-                            LOG("Sending actual ping. Logging silence.");
+                            LOG("Got ACK message. Sending actual ping. Logging silence.");
                             response[0] = '-';
                             uint64 startTick = getTick();
-                            xbs2_transmitByteQuick(&beacon->serial, message->calibrate.id);
-                            waitforAnyByte(&beacon->serial, response, 1);
+                            xbs2_transmitByte(&beacon->serial, message->calibrate.id);
+                            int32 length = xbs2_waitForAnyByte(&beacon->serial, response, 3);
                             if(response[0] == message->calibrate.id){
-                                totalTicks = getTick() - startTick();
-                                LOG("Got ping. Ticks elapsed: %llu", totalTicks);
+                                totalTicks = getTick() - startTick;
+                                LOG("Got ping. Message '%c'. Ticks elapsed: %llu", response[0], totalTicks);
                             }else{
-                                LOG("Ping timed out. sample failed");
+                                if(length == 0){
+                                    LOG("Ping timed out.");
+                                }else{
+                                    LOG("Bad message. Recevied: '%c' Length %d", response[0], length);
+                                }
                                 totalTicks = 0;
+                                
                             }
-                            
+                            state->calibration[moduleIndex].ticks[sampleIndex][beaconIndex] = totalTicks;
                         }
-                        beacon->calibration[message->calibrate.id].ticks[sampleIndex][beaconIndex] = totalTicks;
+                        
                     }
-                    
                 }
+                
                 Message calibrationReportHeader;
                 calibrationReportHeader.type = MessageType_Calibrate;
                 calibrationReportHeader.calibrate.sampleCount = message->calibrate.sampleCount;
+                calibrationReportHeader.calibrate.id = message->calibrate.id;
                 
                 NetSendSource source;
                 source.bufferLength = sizeof(Message);
                 source.buffer = (char*)&calibrationReportHeader;
                 sendAndReconnect(&source);
                 
-                //4 beacons, 1 tick each, tick is size of uint64
+                //4 beacons, 1 tick each sample, tick is size of uint64
                 source.bufferLength = message->calibrate.sampleCount * sizeof(uint64) * 4;
-                source.buffer = &state->calibration[message->calibrate.id].data;
+                source.buffer = (char*)(&state->calibration[moduleIndex].ticks);
                 
                 sendAndReconnect(&source);
                 
-                state->calibration[message->calibrate.id].calibrated = true;
+                state->calibration[moduleIndex].calibrated = true;
+                
             }
+            
             state->serverMessageAccumulatedSize = 0;
-        }while(resultCode == NetResultType_Ok && state->serverMessageAccumulatedSize != 0);
-    }
-    
+        }
+    }while(resultCode == NetResultType_Ok && state->serverMessageAccumulatedSize != 0);
 #endif
     
 #if METHOD_XBSP

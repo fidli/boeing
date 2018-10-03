@@ -3,8 +3,8 @@
 
 #define METHOD_32 0
 #define METHOD_64 1
-#define METHOD_XBSP 1
-#define METHOD_XBPNG 0
+#define METHOD_XBSP 0
+#define METHOD_XBPNG 1
 
 #endif
 

@@ -120,6 +120,7 @@ struct ProgramContext : Common{
         
         char name;
         MPU6050Settings settings;
+        char sidLower[9];
         
         MemsData memsData[86];
         int32 memsTailIndex;
@@ -201,6 +202,14 @@ struct ProgramContext : Common{
 #if METHOD_XBSP
         uint32 xbFrame;
         float32 xbPeriod;        
+#endif
+#if METHOD_XBPNG
+        struct{
+            uint64 ticks[100][4];
+            uint32 sampleCount;
+        } calibration;        
+        
+        bool needsCalibration;
 #endif
         
         char memsDataBuffer[4096];
@@ -311,8 +320,17 @@ void resetModule(int index, bool haltBoeing = true){
     module->xbTailIndex = 0;
     module->xbHeadIndex = 0;
     module->xbStepsAvailable = 0;
-    
+
+    #if METHOD_XBSP
     module->xbFrame = 0;
+    #endif
+    #if METHOD_XBPNG
+    if(programContext->replay){
+        module->needsCalibration = false;
+    }else{
+        module->needsCalibration = true;
+    }
+    #endif
     module->physicalFrame = 0;
     
     
@@ -523,6 +541,33 @@ extern "C" __declspec(dllexport) void boeingDomainRoutine(int index){
                     module->accumulatedSize = 0;
                     return;
                 }
+                    
+               if(wrap->type == MessageType_Ready ){
+                        #if METHOD_XBPNG
+                        if(module->needsCalibration){
+                        NetSendSource message;
+                        message.bufferLength = sizeof(Message);
+                        
+                        //institute a calibration
+                        Message calibrationCommand;
+                        uint32 sampleCount = 10;
+                        calibrationCommand.type = MessageType_Calibrate;
+                        calibrationCommand.calibrate.sampleCount = sampleCount;
+                        calibrationCommand.calibrate.id = module->name;
+                        strncpy(calibrationCommand.calibrate.sidLower, module->sidLower, 9);
+                        
+                        message.buffer = (char*)&calibrationCommand;
+                        
+                        while(netSend(&programContext->beaconsSocket, &message) != NetResultType_Ok){
+                            
+                        }
+                            module->needsCalibration = false;
+                        }
+                        #endif
+                        module->accumulatedSize = 0;
+                        return;
+                            
+               }
                 
                 ASSERT(wrap->data.length % sizeof(MemsData) == 0 && sizeof(MemsData) == 12);
                 
@@ -589,10 +634,19 @@ extern "C" __declspec(dllexport) void beaconsDomainRoutine(){
         Sleep(1000);
         return;
     }
+    for(uint8 moduleIndex = 0; moduleIndex < ARRAYSIZE(programContext->modules); moduleIndex++){
+        ProgramContext::Module * module = &programContext->modules[moduleIndex];
+    if(module->haltProcessing){
+        module->beaconsHalted = true;
+        while(module->haltProcessing){};
+        module->beaconsHalted = false;
+    }
+    }
     NetRecvResult result;
     result.bufferLength = sizeof(Message);
     Message * message = &programContext->lastBeaconsMessage;
     if(programContext->keepRunning && programContext->beaconsRun){
+        
         result.bufferLength = sizeof(Message) - programContext->beaconsAccumulatedSize;
         result.buffer = ((char *) message) + programContext->beaconsAccumulatedSize;
         NetResultType resultCode = netRecv(&programContext->beaconsSocket, &result);
@@ -604,15 +658,9 @@ extern "C" __declspec(dllexport) void beaconsDomainRoutine(){
                     resetBeacons();
                     programContext->beaconsAccumulatedSize = 0;
                     return;
-                }
+                }else if(message->type == MessageType_Data){
                 ASSERT(message->data.boeingId <= 1);
                 ProgramContext::Module * module = &programContext->modules[message->data.boeingId];
-                
-                if(module->haltProcessing){
-                    module->beaconsHalted = true;
-                    while(module->haltProcessing){};
-                    module->beaconsHalted = false;
-                }
                 
                 ASSERT(message->data.length <= ARRAYSIZE(module->xbDataBuffer));
                 
@@ -646,7 +694,46 @@ extern "C" __declspec(dllexport) void beaconsDomainRoutine(){
                     
                     
                 }
+                    }else{
+                        #if METHOD_XBSP
+                        INV;
+                        #endif
+                        #if METHOD_XBPNG
+                        ASSERT(message->type == MessageType_Calibrate);
+                        int moduleIndex = (int)(message->calibrate.id - '1');
+                        ProgramContext::Module * module = &programContext->modules[moduleIndex];
+                        uint32 sampleCount = message->calibrate.sampleCount;
+                        //4 beacons, 1 tick each sample, tick is size of uint64
+                        uint32 byteSize = sampleCount * 4 * sizeof(uint64);
+                        //just to be sure about arraysize functionality
+                        ASSERT(ARRAYSIZE(module->calibration.ticks) == 100);
+                        ASSERT(sampleCount <= ARRAYSIZE(module->calibration.ticks));
+
+                        result.bufferLength = byteSize; 
+                        result.buffer = (char *)(&module->calibration.ticks);
+                result.resultLength = 0;
+                uint16 accumulated = 0;
+                while(accumulated != byteSize){
+                    
+                    
+                    result.buffer += accumulated;
+                    result.bufferLength = byteSize - accumulated;
+                    result.resultLength = 0;
+                    
+                    resultCode = netRecv(&programContext->beaconsSocket, &result);
+                    accumulated += result.resultLength;
+                    
+                    if(resultCode != NetResultType_Ok){
+                        break;
+                    }
+                }
+                
+                ASSERT(accumulated == byteSize);
+                        module->calibration.sampleCount = sampleCount;                        
+                        #endif
+                    }
                 programContext->beaconsAccumulatedSize = 0;
+                
             }
             }else{
                 Sleep(100);
@@ -713,7 +800,10 @@ extern "C" __declspec(dllexport) void serverDomainRoutine(){
                     
                     module->name = wrap->init.boeing.name;
                     module->settings = wrap->init.boeing.settings;
+                    #if METHOD_XBSP
                     module->xbPeriod = wrap->init.boeing.xbPeriod;
+                    #endif
+                    strncpy(module->sidLower, wrap->init.boeing.sidLower, 9);
                     
                     ProgramContext::Beacon * aBeacon = &programContext->beacons[0];
                     
@@ -735,7 +825,8 @@ extern "C" __declspec(dllexport) void serverDomainRoutine(){
                     //default attributes
                     resetModule(i);
                     
-                    
+
+                                        
                 }else if(clientType == ClientType_Beacon){
                     //reorder beacons according to the beacon client
                     for(uint8 sourceIndex = 0; sourceIndex < ARRAYSIZE(programContext->beacons); sourceIndex++){
@@ -973,8 +1064,10 @@ extern "C" __declspec(dllexport) void initDomainRoutine(void * memoryStart, Imag
                     module->run = true;
                     //mems rate
                     result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%hu", &module->settings.sampleRate) == 1;
+                    #if METHOD_XBSP
                     //xbPeriod
                     result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%f", &module->xbPeriod) == 1;
+                    #endif
                     //acc
                     result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%u", &module->settings.accPrecision) == 1;
                     //gyro
@@ -1032,13 +1125,15 @@ extern "C" __declspec(dllexport) void initDomainRoutine(void * memoryStart, Imag
                     //beacons time divisor count
                     result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%llu", &programContext->beacons[0].timeDivisor) == 1;
                     programContext->beacons[3].timeDivisor = programContext->beacons[2].timeDivisor = programContext->beacons[1].timeDivisor = programContext->beacons[0].timeDivisor; 
-                    
+
+                    #if METHOD_XBSP
                     //xb data
                     for(uint32 di = 0; di < programContext->recordData.data[moduleIndex].recordDataXbCount; di++){
                         result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%llu %llu %llu %llu", &programContext->recordData.data[moduleIndex].xb[di].delay[0], &programContext->recordData.data[moduleIndex].xb[di].delay[1], &programContext->recordData.data[moduleIndex].xb[di].delay[2], &programContext->recordData.data[moduleIndex].xb[di].delay[3]) == 4;
                         
                         
                     }
+                    #endif
                     module->boeingHalted = true;
                     module->beaconsHalted = true;
                     module->processHalted = true;
@@ -1208,11 +1303,13 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
                 linelen = strlen(line);
                 strncpy(contents.contents + offset, line, linelen);
                 offset += linelen;
+                #if METHOD_XBSP
                 //xb period
                 snprintf(line, linesize, "%f\r\n", module->xbPeriod);
                 linelen = strlen(line);
                 strncpy(contents.contents + offset, line, linelen);
                 offset += linelen;
+                #endif
                 //acc
                 snprintf(line, linesize, "%u\r\n", module->settings.accPrecision);
                 linelen = strlen(line);
@@ -1313,6 +1410,7 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
                 linelen = strlen(line);
                 strncpy(contents.contents + offset, line, linelen);
                 offset += linelen;
+                #if METHOD_XBSP
                 //xb data
                 for(uint32 xbDataIndex = 0; xbDataIndex < programContext->recordData.data[i].recordDataXbCount; xbDataIndex++){
                     snprintf(line, linesize, "%llu %llu %llu %llu\r\n", programContext->recordData.data[i].xb[xbDataIndex].delay[0], programContext->recordData.data[i].xb[xbDataIndex].delay[1],programContext->recordData.data[i].xb[xbDataIndex].delay[1], programContext->recordData.data[i].xb[xbDataIndex].delay[3]);
@@ -1320,6 +1418,7 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
                     strncpy(contents.contents + offset, line, linelen);
                     offset += linelen;
                 }
+                #endif
                 
             }
         }
@@ -1733,6 +1832,7 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
         
     }else if(programContext->localisationType == LocalisationType_Xb){
         
+        #if METHOD_XBSP
         
         uint16 stepsAmount = 0;
         
@@ -1833,6 +1933,7 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
             }
         programContext->accumulator -= totalTime;
         }
+        #endif
         }
         
            
@@ -2112,9 +2213,11 @@ extern "C" __declspec(dllexport) void renderDomainRoutine(){
         offset.y += 2*fontSize;
         
         if(programContext->localisationType == LocalisationType_Xb || programContext->localisationType == LocalisationType_Both){
+            #if METHOD_XBSP
             sprintf(buffer, "xb frame: %u", activeModule->xbFrame); 
             printToBitmap(programContext->renderingTarget, offset.x, offset.y, buffer, &programContext->font, fontSize);
             offset.y += fontSize;
+            #endif
             
         }
         
@@ -2170,7 +2273,7 @@ extern "C" __declspec(dllexport) void renderDomainRoutine(){
         }
         
         if(programContext->localisationType == LocalisationType_Xb || programContext->localisationType == LocalisationType_Both){
-            
+            #if METHOD_XBSP            
             sprintf(buffer, "latest time period:"); 
             printToBitmap(programContext->renderingTarget, offset.x, offset.y, buffer, &programContext->font, fontSize);
             offset.y += fontSize;
@@ -2190,6 +2293,7 @@ extern "C" __declspec(dllexport) void renderDomainRoutine(){
                 
             }
             offset.y += border;
+            #endif
         }
         
         

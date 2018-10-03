@@ -18,6 +18,7 @@ enum MessageType{
     MessageType_Reset,
     MessageType_Data,
     MessageType_Calibrate,
+    MessageType_Ready,
     
     MessageTypeCount
 };
@@ -36,6 +37,7 @@ struct Message{
                     char name;
                     MPU6050Settings settings;
                     float32 xbPeriod;
+                    char sidLower[9];
                 } boeing;
                 struct {
                     uint16 frequencyKhz;
@@ -48,6 +50,9 @@ struct Message{
             };
             
         } init;
+        struct {
+            char id;
+        } ready;
         struct {
             uint32 sampleCount;
             char sidLower[9];
