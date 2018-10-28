@@ -457,6 +457,7 @@ extern "C" __declspec(dllexport) void iterateDomainRoutine(){
                 }
                 ASSERT(found);
             }else if(message->type == MessageType_Stop){
+                LOG("Got Stop message, id %c", message->stop.id);
                 for(uint8 moduleIndex = 0; moduleIndex < ARRAYSIZE(state->modules); moduleIndex++){
                     if(state->modules[moduleIndex].ping && state->modules[moduleIndex].id == message->stop.id){
                         state->modules[moduleIndex].ping = false;
@@ -525,7 +526,7 @@ extern "C" __declspec(dllexport) void iterateDomainRoutine(){
             Message header;
             header.type = MessageType_Data;
             header.data.length = 0;
-            header.data.id = '1' + (char)boeingIndex;
+            header.data.id = (char)boeingIndex;
             NetSendSource source;
             source.bufferLength = sizeof(Message);
             source.buffer = (char*)&header;
@@ -573,7 +574,7 @@ extern "C" __declspec(dllexport) void iterateDomainRoutine(){
             Message header;
             header.type = MessageType_Data;
             header.data.length = sendBufferIndex;
-            header.data.id = moduleIndex;
+            header.data.id = state->modules[moduleIndex].id;
             
             NetSendSource source;
             source.bufferLength = sizeof(Message);

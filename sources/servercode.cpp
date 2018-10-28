@@ -92,6 +92,7 @@ union MemsData{
     };    
 };
 
+#pragma pack(push, 4)
 struct XbData{
 #if METHOD_XBSP
     int64 delay[4];
@@ -102,6 +103,7 @@ struct XbData{
     uint64 lastTick;
     #endif
 };
+#pragma pack(pop)
 
 
 enum LocalisationType{
@@ -122,6 +124,7 @@ struct ProgramContext : Common{
     NetSocket beaconsSocket;
     struct Module{
        
+        bool calibrated;
         
         char name;
         MPU6050Settings settings;
@@ -140,6 +143,8 @@ struct ProgramContext : Common{
         #if METHOD_XBPNG
         uint32 xbFrames[4];
         uint64 lastTicks[4];
+        uint64 calibrationTicks[4][1000];
+        float64 hwBias[4];
         #endif
         
         
@@ -323,6 +328,8 @@ void resetModule(int index, bool haltBoeing = true){
     module->xbHeadIndex = 0;
     module->xbStepsAvailable = 0;
 
+    module->calibrated = false;
+    
     #if METHOD_XBSP
     module->xbFrame = 0;
     #endif
@@ -1156,9 +1163,11 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
     const uint32 memsWarmedUpFrame = 30;
     
     #if METHOD_XBPNG
-    const uint32 xbWarmedUpFrame = 10;
-    const uint32 xbCalibrationFrame = 30;
+    const uint32 xbWarmedUpFrame = 3;
+    const uint32 xbCalibrationFrame = 10;
     #endif
+    
+    float64 speedOfLight = 300000000.0f;
     
     float32 start = getProcessCurrentTime();
     bool record = programContext->record;
@@ -1788,7 +1797,7 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
                         module->worldOrientation64 = rotationMatrix * module->worldOrientation64;
                         
 #endif
-                        
+                        module->calibrated = true;
                     }else{
                         if(module->physicalFrame > memsWarmedUpFrame){
                             //gather data?
@@ -1864,29 +1873,65 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
                 uint64 lastTicks[4] = {};
                 bool doAABB = false;
                 stepsTaken[moduleIndex] = module->xbStepsAvailable;
-                int32 targetTail = module->xbTailIndex + stepsTaken[moduleIndex];
-                for(; module->xbTailIndex != targetTail; module->xbTailIndex++){
-                    XbData * source = &module->xbData[module->xbTailIndex];
-                    module->xbFrames[source->beaconIndex]++;
+                int32 size = ARRAYSIZE(module->xbData);
+                int32 targetTail = (module->xbTailIndex + stepsTaken[moduleIndex]) % size;
+                for(; module->xbTailIndex != targetTail; module->xbTailIndex = (module->xbTailIndex + 1) % size){
+                    XbData * source = &module->xbData[module->xbTailIndex];          
+                    if(module->xbFrames[source->beaconIndex] >= xbWarmedUpFrame && module->xbFrames[source->beaconIndex] < xbCalibrationFrame){
+                        //NOTE(AK): save calibration data
+                        int32 index = module->xbFrames[source->beaconIndex] - xbWarmedUpFrame;
+                        module->calibrationTicks[source->beaconIndex][index] = source->lastTick;                        
+                    }else if(module->xbFrames[source->beaconIndex] == xbCalibrationFrame){
+                        //NOTE(AK): actually calibrate
+                                                
+                        float64 initialDistance = length64(programContext->beacons[source->beaconIndex].worldPosition64 - module->worldPosition64);
+                        float64 supposedTiming = 2*initialDistance / speedOfLight;
+                        
+                        int32 calibrationSamples = module->xbFrames[source->beaconIndex] - xbWarmedUpFrame;
+                        //NOTE(AK):
+                        //idea: we could also use the lowest value as no FSPT noise, and pure hw noise
+                        float64 lowestNoise = translateTickToTime(module->calibrationTicks[source->beaconIndex][0], programContext->beacons[source->beaconIndex].timeDivisor);
+                        for(int32 i = 1; i < calibrationSamples; i++){
+                            float64 realTiming = translateTickToTime(module->calibrationTicks[source->beaconIndex][i], programContext->beacons[source->beaconIndex].timeDivisor);
+                            ASSERT(realTiming >= supposedTiming);
+                            float64 bothNoises = realTiming - supposedTiming;
+                            if(bothNoises < lowestNoise){
+                               lowestNoise = bothNoises;       
+                            }
+                        }
+                        module->hwBias[source->beaconIndex] = lowestNoise;
+                                                                      
+                        bool calibrated = true;
+                        for(uint8 i = 0; i < ARRAYSIZE(module->xbFrames); i++){
+                            calibrated &= module->xbFrames[i] >= xbCalibrationFrame;
+                        }
+                        module->calibrated = calibrated;
+                    }
                     lastTicks[source->beaconIndex] = source->lastTick;
+                    module->xbFrames[source->beaconIndex]++;
+                    module->lastTicks[source->beaconIndex] = lastTicks[source->beaconIndex];
                 }
+                
                 for(uint8 i = 0; i < ARRAYSIZE(lastTicks); i++){
-                    if(lastTicks[i]){
-                        //TODO(AK): sub the bias, recalculate position, induce AABB localisation
+                    if(lastTicks[i] && module->xbFrames[i] > xbCalibrationFrame){
+                        //TODO(AK): induce AABB localisation
                         float64 timing = translateTickToTime(lastTicks[i], programContext->beacons[i].timeDivisor);                        
                         //sub bias
+                        if(timing > module->hwBias[i]){
+                            timing -= module->hwBias[i];
+                        }
                         timing = timing/2;
-                        float64 c = 300000000.0f;
-                        float64 proximity = c * timing;
+                        ASSERT(timing > 0);
+                        float64 proximity = speedOfLight * timing;
                         programContext->beacons[i].moduleDistance64[moduleIndex] = proximity;
-                        module->lastTicks[i] = lastTicks[i];       
                         doAABB = true;
                     }
                 }
-                if(doAABB){
+                if(module->calibrated && doAABB){
                 //do aabb
+                    
                 }
-                
+                FETCH_AND_ADD(&module->xbStepsAvailable, -stepsTaken[moduleIndex]);
             }
         }
         
@@ -1970,14 +2015,15 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
                         }else{
                             data = &module->xbData[module->xbTailIndex];
                         }
-                        //do stuff
+                        //do stuff, also calibration or some?
+                        module->calibrated = true;
                         #if METHOD_32
                         #elif METHOD_64
                         for(uint8 beaconIndex = 0; beaconIndex < 4; beaconIndex++){
                             float64 timing = translateTickToTime(data->delay[beaconIndex], programContext->beacons[beaconIndex].timeDivisor);
                             float64 timeDelta = timing - module->xbPeriod;
-                            float64 c = 300000000.0f;
-                            float64 difference = c*timeDelta;
+
+                            float64 difference = speedOfLight*timeDelta;
                             programContext->beacons[beaconIndex].moduleDistance64[i] += difference;
                             //NOTE(AK): superposition principle, the time delta should be as low as possible to consider this a linear step
                             v3_64 direction = module->worldPosition64 - programContext->beacons[beaconIndex].worldPosition64;
@@ -2254,8 +2300,16 @@ extern "C" __declspec(dllexport) void renderDomainRoutine(){
         printToBitmap(programContext->renderingTarget, offset.x, offset.y, buffer, &programContext->font, fontSize);
         offset.y += fontSize*2;
         
-        sprintf(buffer, "module: %1c", activeModule->name); 
+        sprintf(buffer, "module: %1c", activeModule->name);
         printToBitmap(programContext->renderingTarget, offset.x, offset.y, buffer, &programContext->font, fontSize);
+        int32 oldOffsetX = offset.x;
+        offset.x += (strlen(buffer)+1)*fontSize;
+        if(activeModule->calibrated){
+           printToBitmap(programContext->renderingTarget, offset.x, offset.y, "CALIBRATED", &programContext->font, fontSize, green);
+        }else{
+           printToBitmap(programContext->renderingTarget, offset.x, offset.y, "NOT CALIBRATED", &programContext->font, fontSize, red);
+        }
+        offset.x = oldOffsetX;
         offset.y += 2*fontSize;
         
         if(activeModule->run){
@@ -2363,11 +2417,24 @@ extern "C" __declspec(dllexport) void renderDomainRoutine(){
             
                        
             for(uint8 beaconIndex = 0; beaconIndex < 4; beaconIndex++){
-                sprintf(buffer, "%9s: %u %.15f", programContext->beacons[beaconIndex].sidLower, activeModule->xbFrames[beaconIndex], (activeModule->lastTicks[beaconIndex])/(float64)programContext->beacons[beaconIndex].timeDivisor); 
+                sprintf(buffer, "%9s: %04u %.15f", programContext->beacons[beaconIndex].sidLower, activeModule->xbFrames[beaconIndex], (activeModule->lastTicks[beaconIndex])/(float64)programContext->beacons[beaconIndex].timeDivisor); 
                 printToBitmap(programContext->renderingTarget, offset.x, offset.y, buffer, &programContext->font, fontSize);
                 offset.y += fontSize;
             }
             #endif
+            offset.x -= border;
+            sprintf(buffer, "beacon distances:");
+            printToBitmap(programContext->renderingTarget, offset.x, offset.y, buffer, &programContext->font, fontSize);
+            offset.y += fontSize;
+            offset.x += border;
+            
+            for(uint8 beaconIndex = 0; beaconIndex < 4; beaconIndex++){
+                sprintf(buffer, "%9s: %.15f", programContext->beacons[beaconIndex].sidLower, programContext->beacons[beaconIndex].moduleDistance64[programContext->activeModuleIndex]); 
+                printToBitmap(programContext->renderingTarget, offset.x, offset.y, buffer, &programContext->font, fontSize);
+                offset.y += fontSize;
+            }
+            
+            
         }
         
         
