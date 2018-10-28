@@ -17,7 +17,8 @@ enum MessageType{
     MessageType_Init,
     MessageType_Reset,
     MessageType_Data,
-    MessageType_Calibrate,
+    MessageType_Start,
+    MessageType_Stop,
     MessageType_Ready,
     
     MessageTypeCount
@@ -54,13 +55,15 @@ struct Message{
             char id;
         } ready;
         struct {
-            uint32 sampleCount;
             char sidLower[9];
             char id;
-        } calibrate;
+        } start;
+        struct {
+            char id;
+        } stop;
         struct {
             uint32 length;
-            uint8 boeingId;
+            char id;
         } data;
     };
 };

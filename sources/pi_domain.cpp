@@ -79,14 +79,18 @@ extern "C" void pumpXbDomainRoutine(){
     int32 res = xbs2_waitForAnyMessage(&domainState->xb, xbRecvBuffer, ARRAYSIZE(xbRecvBuffer), 3);
     xbRecvBuffer[8] = 0;
     if(res == 9){
+#if LOG_PING
         printf("Got ping announcement from %s\n", xbRecvBuffer);
         printf("Flushing pipe\n");
+#endif
         while(!clearSerialPort(&domainState->xb));
         while(!xbs2_changeAddress(&domainState->xb, xbRecvBuffer)){
             printf("Failed to change XB address\n");
             sleep(1);
         }
+#if LOG_PING
         printf("Sending ACK, then entering logging silence and waiting for ping\n");
+#endif
         while(!xbs2_transmitByte(&domainState->xb, domainState->id)){
             printf("Failed to transmit ACK\n");
             sleep(1);
@@ -95,13 +99,19 @@ extern "C" void pumpXbDomainRoutine(){
         //awaiting 1 char
         if(xbs2_waitForAnyByte(&domainState->xb, &ping, 3)){
             while(!xbs2_transmitByte(&domainState->xb, ping));
+#if LOG_PING
             printf("Got ping message '%c', replied ping '%c'\n", ping, ping);
+#endif
         }else{
+#if LOG_PING
             printf("Failed to optain ping message. timeout\n");
+#endif
         }
         
     }else if (res != 0){
+#if LOG_PING
         printf("Got only %d characters: %s\n", res, xbRecvBuffer);
+#endif
     }
     //else is ok, there is no ping request
 #endif

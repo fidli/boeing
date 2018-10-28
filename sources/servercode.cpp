@@ -96,6 +96,11 @@ struct XbData{
 #if METHOD_XBSP
     int64 delay[4];
     #endif
+#if METHOD_XBPNG
+    //NOTE(AK): padding
+    uint32 beaconIndex;
+    uint64 lastTick;
+    #endif
 };
 
 
@@ -109,7 +114,6 @@ enum LocalisationType{
     LocalisationTypeCount
 };
 
-
 struct ProgramContext : Common{
     bool inited;
     BitmapFont font;
@@ -117,6 +121,7 @@ struct ProgramContext : Common{
     NetSocket boeingSocket[2];
     NetSocket beaconsSocket;
     struct Module{
+       
         
         char name;
         MPU6050Settings settings;
@@ -131,6 +136,11 @@ struct ProgramContext : Common{
         int32 xbTailIndex;
         int32 xbHeadIndex;
         int32 xbStepsAvailable;
+        
+        #if METHOD_XBPNG
+        uint32 xbFrames[4];
+        uint64 lastTicks[4];
+        #endif
         
         
         dv3 gyroBiasLower;
@@ -202,14 +212,6 @@ struct ProgramContext : Common{
 #if METHOD_XBSP
         uint32 xbFrame;
         float32 xbPeriod;        
-#endif
-#if METHOD_XBPNG
-        struct{
-            uint64 ticks[100][4];
-            uint32 sampleCount;
-        } calibration;        
-        
-        bool needsCalibration;
 #endif
         
         char memsDataBuffer[4096];
@@ -324,11 +326,9 @@ void resetModule(int index, bool haltBoeing = true){
     #if METHOD_XBSP
     module->xbFrame = 0;
     #endif
-    #if METHOD_XBPNG
-    if(programContext->replay){
-        module->needsCalibration = false;
-    }else{
-        module->needsCalibration = true;
+    #if METHOD_XBPNG 
+    for(uint8 i = 0; i < ARRAYSIZE(module->xbFrames); i++){
+        module->xbFrames[i] = 0;
     }
     #endif
     module->physicalFrame = 0;
@@ -544,25 +544,23 @@ extern "C" __declspec(dllexport) void boeingDomainRoutine(int index){
                     
                if(wrap->type == MessageType_Ready ){
                         #if METHOD_XBPNG
-                        if(module->needsCalibration){
+
                         NetSendSource message;
                         message.bufferLength = sizeof(Message);
                         
-                        //institute a calibration
-                        Message calibrationCommand;
-                        uint32 sampleCount = 10;
-                        calibrationCommand.type = MessageType_Calibrate;
-                        calibrationCommand.calibrate.sampleCount = sampleCount;
-                        calibrationCommand.calibrate.id = module->name;
-                        strncpy(calibrationCommand.calibrate.sidLower, module->sidLower, 9);
+
+                        Message startCommand;
+                        startCommand.type = MessageType_Start;
+                        startCommand.start.id = module->name;
+                        strncpy(startCommand.start.sidLower, module->sidLower, 9);
                         
-                        message.buffer = (char*)&calibrationCommand;
+                        message.buffer = (char*)&startCommand;
                         
                         while(netSend(&programContext->beaconsSocket, &message) != NetResultType_Ok){
                             
                         }
-                            module->needsCalibration = false;
-                        }
+
+                        
                         #endif
                         module->accumulatedSize = 0;
                         return;
@@ -621,6 +619,16 @@ extern "C" __declspec(dllexport) void boeingDomainRoutine(int index){
         }else{
             closeSocket(&programContext->boeingSocket[index]);
             module->run = false;
+            NetSendSource message;
+            message.bufferLength = sizeof(Message);
+            Message stopCommand;
+            stopCommand.type = MessageType_Stop;
+            stopCommand.stop.id = module->name;
+            message.buffer = (char*)&stopCommand;
+            
+            while(netSend(&programContext->beaconsSocket, &message) != NetResultType_Ok){
+                
+            }
         }
     }else{
         Sleep(500);
@@ -659,8 +667,9 @@ extern "C" __declspec(dllexport) void beaconsDomainRoutine(){
                     programContext->beaconsAccumulatedSize = 0;
                     return;
                 }else if(message->type == MessageType_Data){
-                ASSERT(message->data.boeingId <= 1);
-                ProgramContext::Module * module = &programContext->modules[message->data.boeingId];
+                        uint8 boeingId = message->data.id - '1';
+                ASSERT(boeingId <= 1);
+                ProgramContext::Module * module = &programContext->modules[boeingId];
                 
                 ASSERT(message->data.length <= ARRAYSIZE(module->xbDataBuffer));
                 
@@ -682,7 +691,8 @@ extern "C" __declspec(dllexport) void beaconsDomainRoutine(){
                         break;
                     }
                 }
-                
+
+                        //NOTE(AK): this works for both XB_METHODS
                 ASSERT(accumulated == message->data.length);
                 ASSERT(accumulated % sizeof(XbData) == 0);
                 ASSERT(accumulated / sizeof(XbData) <= ARRAYSIZE(module->xbData) - module->xbStepsAvailable);
@@ -694,43 +704,8 @@ extern "C" __declspec(dllexport) void beaconsDomainRoutine(){
                     
                     
                 }
-                    }else{
-                        #if METHOD_XBSP
-                        INV;
-                        #endif
-                        #if METHOD_XBPNG
-                        ASSERT(message->type == MessageType_Calibrate);
-                        int moduleIndex = (int)(message->calibrate.id - '1');
-                        ProgramContext::Module * module = &programContext->modules[moduleIndex];
-                        uint32 sampleCount = message->calibrate.sampleCount;
-                        //4 beacons, 1 tick each sample, tick is size of uint64
-                        uint32 byteSize = sampleCount * 4 * sizeof(uint64);
-                        //just to be sure about arraysize functionality
-                        ASSERT(ARRAYSIZE(module->calibration.ticks) == 100);
-                        ASSERT(sampleCount <= ARRAYSIZE(module->calibration.ticks));
 
-                        result.bufferLength = byteSize; 
-                        result.buffer = (char *)(&module->calibration.ticks);
-                result.resultLength = 0;
-                uint16 accumulated = 0;
-                while(accumulated != byteSize){
-                    
-                    
-                    result.buffer += accumulated;
-                    result.bufferLength = byteSize - accumulated;
-                    result.resultLength = 0;
-                    
-                    resultCode = netRecv(&programContext->beaconsSocket, &result);
-                    accumulated += result.resultLength;
-                    
-                    if(resultCode != NetResultType_Ok){
-                        break;
-                    }
-                }
-                
-                ASSERT(accumulated == byteSize);
-                        module->calibration.sampleCount = sampleCount;                        
-                        #endif
+                        
                     }
                 programContext->beaconsAccumulatedSize = 0;
                 
@@ -1180,6 +1155,11 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
     const uint32 memsCalibrationFrame = 100;
     const uint32 memsWarmedUpFrame = 30;
     
+    #if METHOD_XBPNG
+    const uint32 xbWarmedUpFrame = 10;
+    const uint32 xbCalibrationFrame = 30;
+    #endif
+    
     float32 start = getProcessCurrentTime();
     bool record = programContext->record;
     //record beginning
@@ -1435,7 +1415,9 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
     programContext->wasRecord = record;
     
     int32 memsSteps[2];
+    #if METHOD_XBSP
     int32 xbSteps[2];
+    #endif
     
     for(uint8 i = 0; i < 2; i++){
         ProgramContext::Module * module = &programContext->modules[i];
@@ -1446,25 +1428,37 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
                 while(module->haltProcessing){};
                 module->processHalted = false;
             }
+            
+                        
+            
+            
             if(programContext->replay){
                 memsSteps[i] = programContext->recordData.data[i].recordDataMemsCount - programContext->recordData.data[i].recordDataMemsIndex;
+#if METHOD_XBSP
                 xbSteps[i] = programContext->recordData.data[i].recordDataXbCount - programContext->recordData.data[i].recordDataXbIndex;
+                #endif
             }else{
                 memsSteps[i] = module->memsStepsAvailable;
+#if METHOD_XBSP
                 xbSteps[i] = module->xbStepsAvailable;
+                #endif
             }
             
             ASSERT(memsSteps[i] >= 0);
+#if METHOD_XBSP
             ASSERT(xbSteps[i] >= 0);
+            #endif
             if(record){
                 for(uint32 di = 0; di < memsSteps[i]; di++){
                     programContext->recordData.data[i].mems[programContext->recordData.data[i].recordDataMemsCount++] = module->memsData[(module->memsTailIndex + di) % ARRAYSIZE(ProgramContext::Module::memsData)];
                     ASSERT(programContext->recordData.data[i].recordDataMemsCount < ARRAYSIZE(programContext->recordData.data[i].mems));
                 }
+#if METHOD_XBSP
                 for(uint32 di = 0; di < xbSteps[i]; di++){
                     programContext->recordData.data[i].xb[programContext->recordData.data[i].recordDataXbCount++] = module->xbData[(module->xbTailIndex + di) % ARRAYSIZE(ProgramContext::Module::xbData)];
                     ASSERT(programContext->recordData.data[i].recordDataXbCount < ARRAYSIZE(programContext->recordData.data[i].xb));
                 }
+                #endif
             }
         }
     }
@@ -1484,8 +1478,10 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
             
             if(module->run){
                 //wash out xb steps
+#if METHOD_XBSP
                 FETCH_AND_ADD(&module->xbStepsAvailable, -xbSteps[i]);
                 module->xbTailIndex = (module->xbTailIndex + xbSteps[i]) % ARRAYSIZE(module->xbData); 
+                #endif
                 if(dt == 0){
                     stepsAmount = memsSteps[i];
                 }else{
@@ -1831,7 +1827,72 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
         }
         
     }else if(programContext->localisationType == LocalisationType_Xb){
+        #if METHOD_XBPNG
         
+        for(uint32 i = 0; i < ARRAYSIZE(programContext->modules); i++){
+            ProgramContext::Module * module = &programContext->modules[i];
+            
+            if(module->run){
+                //wash out the mems data
+                FETCH_AND_ADD(&module->memsStepsAvailable, -memsSteps[i]);
+                module->memsTailIndex = (module->memsTailIndex + memsSteps[i]) % ARRAYSIZE(module->memsData);          
+            }
+        }
+        /*
+        if(programContext->restartReplay || stepsAmount == 0){
+            if(programContext->replay){
+                for(uint32 i = 0; i < ARRAYSIZE(programContext->modules); i++){
+                    //reset
+                    resetModule(i);
+                    programContext->accumulator = 0;
+                    programContext->restartReplay = false;
+                    Sleep(100);
+                }
+                return;               
+            }else{
+                Sleep(500);
+            }
+        }*/
+        
+        int32 stepsTaken[2];
+        
+        for(uint32 moduleIndex = 0; moduleIndex < ARRAYSIZE(programContext->modules); moduleIndex++){
+            ProgramContext::Module * module = &programContext->modules[moduleIndex];
+            if(module->run){
+                //NOTE(AK): Get the latest ping, as we do not care for the sequence, but rather latest info
+                //NOTE(AK): Saving not directly as we need to know if the data is from this physical frame
+                uint64 lastTicks[4] = {};
+                bool doAABB = false;
+                stepsTaken[moduleIndex] = module->xbStepsAvailable;
+                int32 targetTail = module->xbTailIndex + stepsTaken[moduleIndex];
+                for(; module->xbTailIndex != targetTail; module->xbTailIndex++){
+                    XbData * source = &module->xbData[module->xbTailIndex];
+                    module->xbFrames[source->beaconIndex]++;
+                    lastTicks[source->beaconIndex] = source->lastTick;
+                }
+                for(uint8 i = 0; i < ARRAYSIZE(lastTicks); i++){
+                    if(lastTicks[i]){
+                        //TODO(AK): sub the bias, recalculate position, induce AABB localisation
+                        float64 timing = translateTickToTime(lastTicks[i], programContext->beacons[i].timeDivisor);                        
+                        //sub bias
+                        timing = timing/2;
+                        float64 c = 300000000.0f;
+                        float64 proximity = c * timing;
+                        programContext->beacons[i].moduleDistance64[moduleIndex] = proximity;
+                        module->lastTicks[i] = lastTicks[i];       
+                        doAABB = true;
+                    }
+                }
+                if(doAABB){
+                //do aabb
+                }
+                
+            }
+        }
+        
+        
+        #endif
+                
         #if METHOD_XBSP
         
         uint16 stepsAmount = 0;
@@ -2293,6 +2354,19 @@ extern "C" __declspec(dllexport) void renderDomainRoutine(){
                 
             }
             offset.y += border;
+            #endif
+            #if METHOD_XBPNG
+            sprintf(buffer, "latest 4 pings:");
+            printToBitmap(programContext->renderingTarget, offset.x, offset.y, buffer, &programContext->font, fontSize);
+            offset.y += fontSize;
+            offset.x += border;
+            
+                       
+            for(uint8 beaconIndex = 0; beaconIndex < 4; beaconIndex++){
+                sprintf(buffer, "%9s: %u %.15f", programContext->beacons[beaconIndex].sidLower, activeModule->xbFrames[beaconIndex], (activeModule->lastTicks[beaconIndex])/(float64)programContext->beacons[beaconIndex].timeDivisor); 
+                printToBitmap(programContext->renderingTarget, offset.x, offset.y, buffer, &programContext->font, fontSize);
+                offset.y += fontSize;
+            }
             #endif
         }
         
