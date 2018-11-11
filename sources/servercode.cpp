@@ -145,6 +145,7 @@ struct ProgramContext : Common{
         uint64 lastTicks[4];
         uint64 calibrationTicks[4][1000];
         float64 hwBias[4];
+        Box_64 xbAABB;
         #endif
         
         
@@ -337,6 +338,7 @@ void resetModule(int index, bool haltBoeing = true){
     for(uint8 i = 0; i < ARRAYSIZE(module->xbFrames); i++){
         module->xbFrames[i] = 0;
     }
+    module->xbAABB.lowerCorner = module->xbAABB.upperCorner = V3_64(0, 0, 0);
     #endif
     module->physicalFrame = 0;
     
@@ -1929,7 +1931,34 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
                 }
                 if(module->calibrated && doAABB){
                 //do aabb
-                    
+                    //NOTE(AK): each with each once, 4 beacons
+                    Box_64 metaResults[6];
+                    uint8 metaResultCount = 0;
+                    for(uint8 i = 0; i < ARRAYSIZE(programContext->beacons); i++){
+                        Sphere_64 A;
+                        A.origin = programContext->beacons[i].worldPosition64;
+                        A.radius = programContext->beacons[i].moduleDistance64[moduleIndex];
+                        for(uint8 j = i+1; j < ARRAYSIZE(programContext->beacons); j++){
+                            Sphere_64 B;
+                            B.origin = programContext->beacons[j].worldPosition64;
+                            B.radius = programContext->beacons[j].moduleDistance64[moduleIndex];
+                            if(intersectSpheresAABB64(&A, &B, &metaResults[metaResultCount])){
+                                metaResultCount++;
+                            }
+                        }
+                    }
+                    //NOTE(AK): from the problem specification, if the data was clear, the count would always be 6
+                    if(metaResultCount){
+                        Box_64 resultAABB = metaResults[0];
+                        for(uint8 i = 1; i < metaResultCount; i++){
+                            Box_64 targetAABB;
+                            if(intersectBoxes64(&resultAABB, &metaResults[i], &targetAABB)){
+                              resultAABB = targetAABB;
+                            }
+                        }
+                        module->xbAABB = resultAABB;
+                        module->worldPosition64 = V3_64(resultAABB.lowerCorner.x + (resultAABB.upperCorner.x - resultAABB.lowerCorner.x)/2, resultAABB.lowerCorner.y + (resultAABB.upperCorner.y - resultAABB.lowerCorner.y)/2, resultAABB.lowerCorner.z + (resultAABB.upperCorner.z - resultAABB.lowerCorner.z)/2);
+                    }
                 }
                 FETCH_AND_ADD(&module->xbStepsAvailable, -stepsTaken[moduleIndex]);
             }
@@ -2176,6 +2205,10 @@ extern "C" __declspec(dllexport) void renderDomainRoutine(){
 #endif
             }
         }
+        //hard limit
+        maxX = MIN(maxX, 10);
+        maxY = MIN(maxY, 10);
+        
         float32 scaleX = ((bottomRightCorner.x - offset.x - 2*border)/2)/maxX;
         float32 scaleY = ((bottomRightCorner.y - offset.y - 2*border)/2)/maxY;
         scaleX = scaleY = MIN(scaleY, scaleX);
@@ -2417,7 +2450,7 @@ extern "C" __declspec(dllexport) void renderDomainRoutine(){
             
                        
             for(uint8 beaconIndex = 0; beaconIndex < 4; beaconIndex++){
-                sprintf(buffer, "%9s: %04u %.15f", programContext->beacons[beaconIndex].sidLower, activeModule->xbFrames[beaconIndex], (activeModule->lastTicks[beaconIndex])/(float64)programContext->beacons[beaconIndex].timeDivisor); 
+                sprintf(buffer, "%9s: %04u %.9f", programContext->beacons[beaconIndex].sidLower, activeModule->xbFrames[beaconIndex], (activeModule->lastTicks[beaconIndex])/(float64)programContext->beacons[beaconIndex].timeDivisor); 
                 printToBitmap(programContext->renderingTarget, offset.x, offset.y, buffer, &programContext->font, fontSize);
                 offset.y += fontSize;
             }
@@ -2429,11 +2462,31 @@ extern "C" __declspec(dllexport) void renderDomainRoutine(){
             offset.x += border;
             
             for(uint8 beaconIndex = 0; beaconIndex < 4; beaconIndex++){
-                sprintf(buffer, "%9s: %.15f", programContext->beacons[beaconIndex].sidLower, programContext->beacons[beaconIndex].moduleDistance64[programContext->activeModuleIndex]); 
+                sprintf(buffer, "%9s: %.3f", programContext->beacons[beaconIndex].sidLower, programContext->beacons[beaconIndex].moduleDistance64[programContext->activeModuleIndex]); 
                 printToBitmap(programContext->renderingTarget, offset.x, offset.y, buffer, &programContext->font, fontSize);
                 offset.y += fontSize;
             }
             
+#if METHOD_XBPNG
+            offset.x -= border;
+            sprintf(buffer, "xb AABB:");
+            printToBitmap(programContext->renderingTarget, offset.x, offset.y, buffer, &programContext->font, fontSize);
+            offset.y += fontSize;
+            offset.x += border;
+            
+            sprintf(buffer, "width(x): %.3f", ABS(activeModule->xbAABB.lowerCorner.x - activeModule->xbAABB.upperCorner.x)); 
+            printToBitmap(programContext->renderingTarget, offset.x, offset.y, buffer, &programContext->font, fontSize);
+            offset.y += fontSize;
+            
+            sprintf(buffer, "height(y): %.3f", ABS(activeModule->xbAABB.lowerCorner.y - activeModule->xbAABB.upperCorner.y)); 
+            printToBitmap(programContext->renderingTarget, offset.x, offset.y, buffer, &programContext->font, fontSize);
+            offset.y += fontSize;
+            
+            sprintf(buffer, "depth(z): %.3f", ABS(activeModule->xbAABB.lowerCorner.z - activeModule->xbAABB.upperCorner.z)); 
+            printToBitmap(programContext->renderingTarget, offset.x, offset.y, buffer, &programContext->font, fontSize);
+            offset.y += fontSize;
+
+            #endif
             
         }
         
