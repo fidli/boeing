@@ -10,8 +10,7 @@ set BASELIB="%cd%\..\..\baselib"
 
 pushd build
 
-rem CANNOT USE SOME C++ FEATURES, std lib is ripped off (https://hero.handmade.network/forums/code-discussion/t/94)
-call cl.exe /nologo /W2 /WX /EHa- /GS- /GR- /Od /Zi /FS /DSERVER /I %BASELIB% /I %LIBDIR% /Fdtest1.pdb /Fetest1.exe %FILES%  /link /INCREMENTAL:NO /NODEFAULTLIB /SUBSYSTEM:CONSOLE %LIBS%
+call cl.exe /nologo /W2 /WX /EHar /GS- /GR- /Od /Zi /FS /DSERVER /DPRECISE_MATH /I %BASELIB% /I %LIBDIR% /Fdtest1.pdb /Fetest1.exe %FILES%  /link /INCREMENTAL:NO /SUBSYSTEM:CONSOLE %LIBS%
                                                          
 
 POPD

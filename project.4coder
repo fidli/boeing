@@ -1,8 +1,9 @@
 extensions = ".c.cpp.h.m.bat.sh.4coder";
 open_recursively = true;
 
-fkey_command_win[1] = {"build_remote_pi.bat", "*compilation*", true};
-fkey_command_win[2] = {"build_x64_beacons.bat", "*compilation*", true};
-fkey_command_win[3] = {"build_x64_server_code.bat", "*compilation*", true};
-fkey_command_win[4] = {"build_x64_server_platform.bat", "*compilation*", true};
-fkey_command_win[5] = {"clean.bat", "*compilation*", true};
+fkey_command_win[1] = {"build_remote_pi_henry.bat", "*compilation*", true};
+fkey_command_win[2] = {"build_remote_pi_rollo.bat", "*compilation*", true};
+fkey_command_win[3] = {"build_x64_beacons.bat", "*compilation*", true};
+fkey_command_win[4] = {"build_x64_server_code.bat", "*compilation*", true};
+fkey_command_win[5] = {"build_x64_server_platform.bat", "*compilation*", true};
+fkey_command_win[6] = {"clean.bat", "*compilation*", true};
