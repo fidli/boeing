@@ -966,7 +966,7 @@ extern "C" __declspec(dllexport) void initDomainRoutine(void * memoryStart, Imag
         
         
         
-        programContext->localisationType = LocalisationType_Mems;
+        programContext->localisationType = LocalisationType_Mems_Ori;
         
         NetSocketSettings settings;
         settings.blocking = false;
@@ -1874,7 +1874,7 @@ extern "C" __declspec(dllexport) void renderDomainRoutine(){
             pos.y = (int32)(scaleY * -programContext->beacons[beaconIndex].worldPosition64.y);
             pos = pos + frameCenter;
             drawCircle(programContext->renderingTarget, &pos, 10, beaconsColors[beaconIndex], 1, true);
-            if(programContext->localisationType == LocalisationType_Xb || programContext->localisationType == LocalisationType_Both){
+            if(programContext->localisationType == LocalisationType_Xb){
                 drawCircle(programContext->renderingTarget, &pos, (uint32)(scaleX * programContext->beacons[beaconIndex].moduleDistance64[programContext->activeModuleIndex]), beaconsColors[beaconIndex], 1);
                 
                 
@@ -1929,12 +1929,16 @@ extern "C" __declspec(dllexport) void renderDomainRoutine(){
         //textual info
         char buffer[122];
         
-        if(programContext->localisationType == LocalisationType_Mems){
-            sprintf(buffer, "method: mems");
-        }else if(programContext->localisationType == LocalisationType_Xb){
+        if(programContext->localisationType == LocalisationType_Mems_Ori){
+            sprintf(buffer, "method: mems orientation");
+        }else if(programContext->localisationType == LocalisationType_Mems_Loco){
+            sprintf(buffer, "method: mems locomotion");
+        }
+        else if(programContext->localisationType == LocalisationType_Mems_Comb){
+            sprintf(buffer, "method: mems combo");
+        }
+        else if(programContext->localisationType == LocalisationType_Xb){
             sprintf(buffer, "method: xb");
-        }else if(programContext->localisationType == LocalisationType_Both){
-            sprintf(buffer, "method: both");
         }else{
             sprintf(buffer, "method: invalid");
         }
@@ -1969,7 +1973,7 @@ extern "C" __declspec(dllexport) void renderDomainRoutine(){
         }
         offset.y += 2*fontSize;
         
-        if(programContext->localisationType == LocalisationType_Xb || programContext->localisationType == LocalisationType_Both){
+        if(programContext->localisationType == LocalisationType_Xb){
 #if METHOD_XBSP
             sprintf(buffer, "xb frame: %u", activeModule->xbFrame); 
             printToBitmap(programContext->renderingTarget, offset.x, offset.y, buffer, &programContext->font, fontSize);
@@ -1979,7 +1983,9 @@ extern "C" __declspec(dllexport) void renderDomainRoutine(){
         }
         
         
-        if(programContext->localisationType == LocalisationType_Mems || programContext->localisationType == LocalisationType_Both){
+        if(programContext->localisationType == LocalisationType_Mems_Ori ||
+           programContext->localisationType == LocalisationType_Mems_Loco ||
+           programContext->localisationType == LocalisationType_Mems_Comb){
             sprintf(buffer, "phys frame: %u", activeModule->physicalFrame); 
             printToBitmap(programContext->renderingTarget, offset.x, offset.y, buffer, &programContext->font, fontSize);
             offset.y += fontSize;
@@ -2018,7 +2024,7 @@ extern "C" __declspec(dllexport) void renderDomainRoutine(){
             offset.y += fontSize;
         }
         
-        if(programContext->localisationType == LocalisationType_Xb || programContext->localisationType == LocalisationType_Both){
+        if(programContext->localisationType == LocalisationType_Xb){
 #if METHOD_XBSP            
             sprintf(buffer, "latest time period:"); 
             printToBitmap(programContext->renderingTarget, offset.x, offset.y, buffer, &programContext->font, fontSize);
@@ -2090,7 +2096,9 @@ extern "C" __declspec(dllexport) void renderDomainRoutine(){
         
         
         
-        if(programContext->localisationType == LocalisationType_Mems || programContext->localisationType == LocalisationType_Both){
+        if(programContext->localisationType == LocalisationType_Mems_Ori ||
+           programContext->localisationType == LocalisationType_Mems_Loco ||
+           programContext->localisationType == LocalisationType_Mems_Comb){
             sprintf(buffer, "world orientation: %.3lf", length64(activeModule->worldOrientation64)); 
             printToBitmap(programContext->renderingTarget, offset.x, offset.y, buffer, &programContext->font, fontSize, blue);
             offset.y += fontSize;
@@ -2110,7 +2118,9 @@ extern "C" __declspec(dllexport) void renderDomainRoutine(){
             offset.x -= border;
         }
         
-        if(programContext->localisationType == LocalisationType_Mems || programContext->localisationType == LocalisationType_Both){
+        if(programContext->localisationType == LocalisationType_Mems_Ori ||
+           programContext->localisationType == LocalisationType_Mems_Loco ||
+           programContext->localisationType == LocalisationType_Mems_Comb){
             sprintf(buffer, "acc: %5.2lf m/s2", length64(activeModule->acceleration64));
             printToBitmap(programContext->renderingTarget, offset.x, offset.y, buffer, &programContext->font, fontSize, red);
             offset.y += fontSize;
@@ -2132,7 +2142,9 @@ extern "C" __declspec(dllexport) void renderDomainRoutine(){
             
         }
         
-        if(programContext->localisationType == LocalisationType_Mems || programContext->localisationType == LocalisationType_Both){
+        if(programContext->localisationType == LocalisationType_Mems_Ori ||
+           programContext->localisationType == LocalisationType_Mems_Loco ||
+           programContext->localisationType == LocalisationType_Mems_Comb){
             sprintf(buffer, "vel: %5.2lf m/s", length64(activeModule->velocity64));
             printToBitmap(programContext->renderingTarget, offset.x, offset.y, buffer, &programContext->font, fontSize);
             offset.y += fontSize;
@@ -2160,7 +2172,9 @@ extern "C" __declspec(dllexport) void renderDomainRoutine(){
     
     offset = {border, (int32)programContext->renderingTarget->info.height - size - border};
     
-    if(programContext->localisationType == LocalisationType_Mems || programContext->localisationType == LocalisationType_Both){
+    if(programContext->localisationType == LocalisationType_Mems_Ori ||
+       programContext->localisationType == LocalisationType_Mems_Loco ||
+       programContext->localisationType == LocalisationType_Mems_Comb){
         
         //orientation pitch
         {
@@ -2570,24 +2584,24 @@ extern "C" __declspec(dllexport) void renderDomainRoutine(){
     
     
     if(programContext->drawHelp){
-        uint32 helpWidth = programContext->renderingTarget.info.width / 3;
-        uint32 helpHeight = programContext->renderingTarget.info.height / 3;
+        int32 helpWidth = programContext->renderingTarget->info.width / 3;
+        int32 helpHeight = programContext->renderingTarget->info.height / 3;
         
-        uint32 startX = (programContext->renderingTarget.info.width - helpWidth)/2;
-        uint32 startY = (programContext->renderingTarget.info.height - helpHeight)/2;
+        int32 startX = (programContext->renderingTarget->info.width - helpWidth)/2;
+        int32 startY = (programContext->renderingTarget->info.height - helpHeight)/2;
         
-        uint32 endX = startX + helpWidth;
-        uint32 endY = startY + helpHeight;
+        int32 endX = startX + helpWidth;
+        int32 endY = startY + helpHeight;
         
         //draw black
-        for(uint32 y = startY; y <= endY; y++){
-            uint32 pitch = y*programContext->renderingTarget->info.width;
-            for(uint32 x = startX; x <= endX; x++){
+        for(int32 y = startY; y <= endY; y++){
+            int32 pitch = y*programContext->renderingTarget->info.width;
+            for(int32 x = startX; x <= endX; x++){
                 ((uint32 *)programContext->renderingTarget->data)[pitch + x] = 0; 
             }
         }
-        uint32 borderX = 10;
-        uint32 borderY = 10;
+        int32 borderX = 10;
+        int32 borderY = 10;
         
         dv2 offset = {startX + borderX, startY + borderY}; 
         
@@ -2597,28 +2611,28 @@ extern "C" __declspec(dllexport) void renderDomainRoutine(){
         printToBitmap(programContext->renderingTarget, offset.x, offset.y, "[R] Start/stop/restart recording", &programContext->font, fontSize, white);
         offset.y += fontSize;
         
-        printToBitmap(programContext->renderingTarget, offset.x, offset.y, "[F1] Show module 1 detail", &programContext->font, fontSize, white);
+        printToBitmap(programContext->renderingTarget, offset.x, offset.y, "[1] Show module 1 detail", &programContext->font, fontSize, white);
         offset.y += fontSize;
         
-        printToBitmap(programContext->renderingTarget, offset.x, offset.y, "[F2] Show module 2 detail", &programContext->font, fontSize, white);
+        printToBitmap(programContext->renderingTarget, offset.x, offset.y, "[2] Show module 2 detail", &programContext->font, fontSize, white);
         offset.y += fontSize;
         
-        printToBitmap(programContext->renderingTarget, offset.x, offset.y, "[1] Algorithm: Mems orientation", &programContext->font, fontSize, white);
+        printToBitmap(programContext->renderingTarget, offset.x, offset.y, "[F1] Algorithm: Mems orientation", &programContext->font, fontSize, white);
         offset.y += fontSize;
         
-        printToBitmap(programContext->renderingTarget, offset.x, offset.y, "[2] Algorithm: Mems locomotion", &programContext->font, fontSize, white);
+        printToBitmap(programContext->renderingTarget, offset.x, offset.y, "[F2] Algorithm: Mems locomotion", &programContext->font, fontSize, white);
         offset.y += fontSize;
         
-        printToBitmap(programContext->renderingTarget, offset.x, offset.y, "[3] Algorithm: Mems combination", &programContext->font, fontSize, white);
+        printToBitmap(programContext->renderingTarget, offset.x, offset.y, "[F3] Algorithm: Mems combination", &programContext->font, fontSize, white);
         offset.y += fontSize;
         
 #if METHOD_XBSP
-        printToBitmap(programContext->renderingTarget, offset.x, offset.y, "[4] Algorithm: XB pump", &programContext->font, fontSize, white);
+        printToBitmap(programContext->renderingTarget, offset.x, offset.y, "[F4] Algorithm: XB pump", &programContext->font, fontSize, white);
         offset.y += fontSize;
 #endif
         
 #if METHOD_XBPNG
-        printToBitmap(programContext->renderingTarget, offset.x, offset.y, "[4] Algorithm: XB ping", &programContext->font, fontSize, white);
+        printToBitmap(programContext->renderingTarget, offset.x, offset.y, "[F4] Algorithm: XB ping", &programContext->font, fontSize, white);
         offset.y += fontSize;
 #endif
         
