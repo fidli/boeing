@@ -22,7 +22,7 @@
 
 #include "util_mem.h"
 #include "util_math.cpp"
-#include "util_filesystem.h"
+#include "util_filesystem.cpp"
 #include "util_net.h"
 #include "util_thread.h"
 #include "xbs2.cpp"
@@ -377,7 +377,7 @@ static bool parseConfig(const char * line){
 }
 
 
-#define IMMEDIATE 0
+#define IMMEDIATE 1
 
 extern "C" void initDomainRoutine(void * memoryStart){
     

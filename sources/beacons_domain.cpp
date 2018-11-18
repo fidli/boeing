@@ -37,14 +37,14 @@ extern "C"{
 #undef ASSERT
 #define ASSERT(expression)  if(!(expression)) {printf("ASSERT failed on line %d file %s\n", __LINE__, __FILE__); *(int *)0 = 0;}
 
+#include "util_string.cpp"
 
 #include "util_mem.h"
 #include "util_time.h"
-#include "util_string.cpp"
+
 #include "xbs2.cpp"
 
 #include "util_io.cpp"
-#include "util_string.cpp"
 
 
 #include "messages.h"

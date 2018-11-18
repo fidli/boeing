@@ -20,7 +20,7 @@
 
 
 #include "util_mem.h"
-#include "util_filesystem.h"
+#include "util_filesystem.cpp"
 #include "linux_filesystem.cpp"
 #include "linux_thread.cpp"
 
