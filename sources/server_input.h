@@ -8,8 +8,10 @@ struct ServerInput{
     bool method1;
     bool method2;
     bool method3;
+    bool method4;
     
     bool record;
+    bool help;
 };
 
 #endif

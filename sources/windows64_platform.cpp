@@ -204,8 +204,14 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
                 case VK_F3:{
                     input.method3 = true;
                 }break;
+                case VK_F4:{
+                    input.method4 = true;
+                }break;
                 case 0x52:{ //'r'
                     input.record = true;
+                }break;
+                case 0x48:{ //'h'
+                    input.help = true;
                 }break;
                 
             };
