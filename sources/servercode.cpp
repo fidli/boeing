@@ -102,6 +102,7 @@ struct XbData{
     uint32 beaconIndex;
     uint64 lastTick;
 #endif
+    float64 timeReceived;
 };
 #pragma pack(pop)
 
@@ -140,6 +141,8 @@ struct ProgramContext : Common{
         int32 xbTailIndex;
         int32 xbHeadIndex;
         int32 xbStepsAvailable;
+        
+        
         
 #if METHOD_XBPNG
         uint32 xbFrames[4];
@@ -198,6 +201,8 @@ struct ProgramContext : Common{
         bool processHalted;
         bool beaconsHalted;
         bool boeingHalted;
+        
+        float64 timeConnected;
     } modules[2];
     
     struct Beacon{
@@ -239,6 +244,9 @@ struct ProgramContext : Common{
             v3_64 defaultWorldOrientation64;
             v3_64 defaultWorldPosition64;
             uint16 biasCount;
+            uint32 warmUpFrames;
+            uint32 calibrationFrames;
+            uint32 startingFrame;
         } defaultModule[2];
         LocalTime startTime;
         struct {
@@ -601,6 +609,7 @@ extern "C" __declspec(dllexport) void beaconsDomainRoutine(){
                         for(uint32 offset = 0; offset < message->data.length; offset += sizeof(XbData)){
                             
                             module->xbData[module->xbHeadIndex] = *((XbData *) (module->xbDataBuffer + offset));
+                            module->xbData[module->xbHeadIndex].timeReceived = getProcessCurrentTime();
                             module->xbHeadIndex = (module->xbHeadIndex + 1) % ARRAYSIZE(module->xbData);
                             FETCH_AND_ADD(&module->xbStepsAvailable, 1);
                             
@@ -699,6 +708,7 @@ extern "C" __declspec(dllexport) void serverDomainRoutine(){
                         
                     }
                     module->run = true;
+                    module->timeConnected = getProcessCurrentTime();
                     //default attributes
                     resetModule(i);
                     
@@ -1213,9 +1223,8 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
     programContext->wasRecord = record;
     
     int32 memsSteps[2];
-#if METHOD_XBSP
     int32 xbSteps[2];
-#endif
+    
     
     for(uint8 i = 0; i < 2; i++){
         ProgramContext::Module * module = &programContext->modules[i];
@@ -1232,31 +1241,23 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
             
             if(programContext->replay){
                 memsSteps[i] = programContext->recordData.data[i].recordDataMemsCount - programContext->recordData.data[i].recordDataMemsIndex;
-#if METHOD_XBSP
                 xbSteps[i] = programContext->recordData.data[i].recordDataXbCount - programContext->recordData.data[i].recordDataXbIndex;
-#endif
             }else{
                 memsSteps[i] = module->memsStepsAvailable;
-#if METHOD_XBSP
                 xbSteps[i] = module->xbStepsAvailable;
-#endif
             }
             
             ASSERT(memsSteps[i] >= 0);
-#if METHOD_XBSP
             ASSERT(xbSteps[i] >= 0);
-#endif
             if(record){
                 for(uint32 di = 0; di < memsSteps[i]; di++){
                     programContext->recordData.data[i].mems[programContext->recordData.data[i].recordDataMemsCount++] = module->memsData[(module->memsTailIndex + di) % ARRAYSIZE(ProgramContext::Module::memsData)];
                     ASSERT(programContext->recordData.data[i].recordDataMemsCount < ARRAYSIZE(programContext->recordData.data[i].mems));
                 }
-#if METHOD_XBSP
                 for(uint32 di = 0; di < xbSteps[i]; di++){
                     programContext->recordData.data[i].xb[programContext->recordData.data[i].recordDataXbCount++] = module->xbData[(module->xbTailIndex + di) % ARRAYSIZE(ProgramContext::Module::xbData)];
                     ASSERT(programContext->recordData.data[i].recordDataXbCount < ARRAYSIZE(programContext->recordData.data[i].xb));
                 }
-#endif
             }
         }
     }
@@ -1822,6 +1823,7 @@ extern "C" __declspec(dllexport) void renderDomainRoutine(){
         
         float32 maxX = 0;
         float32 maxY = 0;
+        
         for(uint8 beaconIndex = 0; beaconIndex < ARRAYSIZE(programContext->beacons); beaconIndex++){
             maxX = MAX(maxX, ABS(programContext->beacons[beaconIndex].worldPosition64.x));
             maxY = MAX(maxY, ABS(programContext->beacons[beaconIndex].worldPosition64.y));
