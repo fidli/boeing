@@ -244,9 +244,17 @@ struct ProgramContext : Common{
             v3_64 defaultWorldOrientation64;
             v3_64 defaultWorldPosition64;
             uint16 biasCount;
-            uint32 warmUpFrames;
-            uint32 calibrationFrames;
-            uint32 startingFrame;
+            uint32 memsWarmedUpFrames;
+            uint32 memsCalibrationFrames;
+            uint32 xbWarmedUpFrames;
+            uint32 xbCalibrationFrames;
+            uint32 memsStartingFrame;
+#if METHOD_XBSP
+            uint32 xbStartingFrame;
+#endif
+#if METHOD_XBPNG
+            uint32 xbStartingFrames[4];
+#endif
         } defaultModule[2];
         LocalTime startTime;
         struct {
@@ -834,7 +842,6 @@ extern "C" __declspec(dllexport) void initDomainRoutine(void * memoryStart, Imag
             
             //beacon names
             //beacon positions
-            //beacon frequency
             
             
             //each module
@@ -878,10 +885,6 @@ extern "C" __declspec(dllexport) void initDomainRoutine(void * memoryStart, Imag
             
             result = result && sscanf(line, "%lf %lf %lf %lf", &programContext->beacons[0].worldPosition64.z, &programContext->beacons[1].worldPosition64.z, &programContext->beacons[2].worldPosition64.z, &programContext->beacons[3].worldPosition64.z) == 4;
             
-            //frequency
-            uint16 kHz;
-            result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%hu", &kHz) == 1;
-            programContext->beacons[0].frequencyKhz = programContext->beacons[1].frequencyKhz = programContext->beacons[2].frequencyKhz = programContext->beacons[3].frequencyKhz = kHz;
             
             for(uint8 moduleIndex = 0; moduleIndex < 2; moduleIndex++){
                 ProgramContext::Module * module = &programContext->modules[moduleIndex];
@@ -1018,18 +1021,25 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
             programContext->recordData.defaultModule[i].defaultWorldOrientation64 = programContext->modules[i].worldOrientation64;
             programContext->recordData.data[i].recordDataXbCount = 0;
             programContext->recordData.data[i].recordDataMemsCount = 0;
+            programContext->recordData.data[i].memsCalibrationFrame = memsCalibrationFrame;
+            programContext->recordData.data[i].xbCalibrationFrame = xbCalibrationFrame;
+            programContext->recordData.data[i].memsWarmedUpFrame = memsWarmedUpFrame;
+            programContext->recordData.data[i].xbWarmedUpFrame = xbWarmedUpFrame;
+            programContext->recordData.data[i].memsStartingFrame = programContext->modules[i].physicalFrame;
+#if METHOD_XBSP
+            programContext->recordData.data[i].xbStartingFrame = programContext->modules[i].xbFrame;
+#endif
+#if METHOD_XBPNG
+            for(int32 j = 0; j < ARRAYSIZE(programContext->beacon); j++){
+                programContext->recordData.data[i].xbStartingFrames[j] = programContext->modules[i].xbFrames[j];
+            }
+#endif
         }
     }else if(!record && programContext->wasRecord){
         //recordend
         FileContents contents;
         contents.contents = programContext->tempRecordContents;
         contents.size = 0;
-        
-        
-        //beacon names
-        //beacon positions
-        //beacon frequency
-        
         
         //each module
         
@@ -1061,154 +1071,160 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
         nint linelen = 0;
         
         //beacon names
-        snprintf(line, linesize, "%8s %8s %8s %8s\r\n", programContext->beacons[0].sidLower, programContext->beacons[1].sidLower, programContext->beacons[2].sidLower, programContext->beacons[3].sidLower);
+        snprintf(line, linesize, "#beacon names\n%8s %8s %8s %8s\r\n", programContext->beacons[0].sidLower, programContext->beacons[1].sidLower, programContext->beacons[2].sidLower, programContext->beacons[3].sidLower);
         linelen = strlen(line);
         strncpy(contents.contents + offset, line, linelen);
         offset += linelen;
         
         
         //beacon x
-        snprintf(line, linesize, "%lf %lf %lf %lf\r\n", programContext->beacons[0].worldPosition64.x, programContext->beacons[1].worldPosition64.x, programContext->beacons[2].worldPosition64.x, programContext->beacons[3].worldPosition64.x);
+        snprintf(line, linesize, "#beacon position x\n%lf %lf %lf %lf\r\n", programContext->beacons[0].worldPosition64.x, programContext->beacons[1].worldPosition64.x, programContext->beacons[2].worldPosition64.x, programContext->beacons[3].worldPosition64.x);
         linelen = strlen(line);
         strncpy(contents.contents + offset, line, linelen);
         offset += linelen;
         
         //beacon y
-        snprintf(line, linesize, "%lf %lf %lf %lf\r\n", programContext->beacons[0].worldPosition64.y, programContext->beacons[1].worldPosition64.y, programContext->beacons[2].worldPosition64.y, programContext->beacons[3].worldPosition64.y);
+        snprintf(line, linesize, "#beacon position y\n%lf %lf %lf %lf\r\n", programContext->beacons[0].worldPosition64.y, programContext->beacons[1].worldPosition64.y, programContext->beacons[2].worldPosition64.y, programContext->beacons[3].worldPosition64.y);
         linelen = strlen(line);
         strncpy(contents.contents + offset, line, linelen);
         offset += linelen;
         
         //beacon z
-        snprintf(line, linesize, "%lf %lf %lf %lf\r\n", programContext->beacons[0].worldPosition64.z, programContext->beacons[1].worldPosition64.z, programContext->beacons[2].worldPosition64.z, programContext->beacons[3].worldPosition64.z);
+        snprintf(line, linesize, "#beacon position z\n%lf %lf %lf %lf\r\n", programContext->beacons[0].worldPosition64.z, programContext->beacons[1].worldPosition64.z, programContext->beacons[2].worldPosition64.z, programContext->beacons[3].worldPosition64.z);
         linelen = strlen(line);
         strncpy(contents.contents + offset, line, linelen);
         offset += linelen;
         
-        //frequency kHz
-        snprintf(line, linesize, "%hu\r\n", programContext->beacons[0].frequencyKhz);
+        //module heads
+        snprintf(line, linesize, "#module headers\n");
         linelen = strlen(line);
         strncpy(contents.contents + offset, line, linelen);
         offset += linelen;
-        
         for(uint8 i = 0; i < 2; i++){
             ProgramContext::Module * module = &programContext->modules[i];
-            if(module->run){
-                //module name
-                snprintf(line, linesize, "%c\r\n", module->name);
-                linelen = strlen(line);
-                strncpy(contents.contents + offset, line, linelen);
-                offset += linelen;
-                
-                //sample rate
-                snprintf(line, linesize, "%hu\r\n", module->settings.sampleRate);
-                linelen = strlen(line);
-                strncpy(contents.contents + offset, line, linelen);
-                offset += linelen;
+            
+            //module name
+            snprintf(line, linesize, "#module name\n%c\r\n", module->name);
+            linelen = strlen(line);
+            strncpy(contents.contents + offset, line, linelen);
+            offset += linelen;
+            
+            //sample rate
+            snprintf(line, linesize, "#module mems sample rate\n%hu\r\n", module->settings.sampleRate);
+            linelen = strlen(line);
+            strncpy(contents.contents + offset, line, linelen);
+            offset += linelen;
 #if METHOD_XBSP
-                //xb period
-                snprintf(line, linesize, "%f\r\n", module->xbPeriod);
-                linelen = strlen(line);
-                strncpy(contents.contents + offset, line, linelen);
-                offset += linelen;
+            //xb period
+            snprintf(line, linesize, "#xb period\n%f\r\n", module->xbPeriod);
+            linelen = strlen(line);
+            strncpy(contents.contents + offset, line, linelen);
+            offset += linelen;
 #endif
-                //acc
-                snprintf(line, linesize, "%u\r\n", module->settings.accPrecision);
+            //acc
+            snprintf(line, linesize, "#acc precision\n%u\r\n", module->settings.accPrecision);
+            linelen = strlen(line);
+            strncpy(contents.contents + offset, line, linelen);
+            offset += linelen;
+            //gyro
+            snprintf(line, linesize, "#gyro precision\n%u\r\n", module->settings.gyroPrecision);
+            linelen = strlen(line);
+            strncpy(contents.contents + offset, line, linelen);
+            offset += linelen;
+            
+            
+            //module default position
+            snprintf(line, linesize, "#default position\r\n%lf %lf %lf\r\n", programContext->recordData.defaultModule[i].defaultWorldPosition64.x, programContext->recordData.defaultModule[i].defaultWorldPosition64.y, programContext->recordData.defaultModule[i].defaultWorldPosition64.z);
+            linelen = strlen(line);
+            strncpy(contents.contents + offset, line, linelen);
+            offset += linelen;
+            
+            //module default world orientation
+            snprintf(line, linesize, "#default orientation\r\n%lf %lf %lf\r\n", programContext->recordData.defaultModule[i].defaultWorldOrientation64.x, programContext->recordData.defaultModule[i].defaultWorldOrientation64.y, programContext->recordData.defaultModule[i].defaultWorldOrientation64.z);
+            linelen = strlen(line);
+            strncpy(contents.contents + offset, line, linelen);
+            offset += linelen;
+            
+            //module default world orientation
+            snprintf(line, linesize, "#default orientation\r\n%lf %lf %lf\r\n", programContext->recordData.defaultModule[i].defaultWorldOrientation64.x, programContext->recordData.defaultModule[i].defaultWorldOrientation64.y, programContext->recordData.defaultModule[i].defaultWorldOrientation64.z);
+            linelen = strlen(line);
+            strncpy(contents.contents + offset, line, linelen);
+            offset += linelen;
+            
+            /*
+                            //acc bias lower
+                            snprintf(line, linesize, "%d %d %d\r\n", programContext->modules[i].accelerationBiasLower.x, programContext->modules[i].accelerationBiasLower.y, programContext->modules[i].accelerationBiasLower.z);
+                            linelen = strlen(line);
+                            strncpy(contents.contents + offset, line, linelen);
+                            offset += linelen;
+                            //acc bias
+                            snprintf(line, linesize, "%d %d %d\r\n", programContext->modules[i].accelerationBias.x, programContext->modules[i].accelerationBias.y, programContext->modules[i].accelerationBias.z);
+                            linelen = strlen(line);
+                            strncpy(contents.contents + offset, line, linelen);
+                            offset += linelen;
+                            //acc bias upper
+                            snprintf(line, linesize, "%d %d %d\r\n", programContext->modules[i].accelerationBiasUpper.x, programContext->modules[i].accelerationBiasUpper.y, programContext->modules[i].accelerationBiasUpper.z);
+                            linelen = strlen(line);
+                            strncpy(contents.contents + offset, line, linelen);
+                            offset += linelen;
+                            
+                            //gyro bias lower
+                            snprintf(line, linesize, "%d %d %d\r\n", programContext->modules[i].gyroBiasLower.x, programContext->modules[i].gyroBiasLower.y, programContext->modules[i].gyroBiasLower.z);
+                            linelen = strlen(line);
+                            strncpy(contents.contents + offset, line, linelen);
+                            offset += linelen;
+                            //gyro bias
+                            snprintf(line, linesize, "%d %d %d\r\n", programContext->modules[i].gyroBias.x, programContext->modules[i].gyroBias.y, programContext->modules[i].gyroBias.z);
+                            linelen = strlen(line);
+                            strncpy(contents.contents + offset, line, linelen);
+                            offset += linelen;
+                            //gyro bias upper
+                            snprintf(line, linesize, "%d %d %d\r\n", programContext->modules[i].gyroBiasUpper.x, programContext->modules[i].gyroBiasUpper.y, programContext->modules[i].gyroBiasUpper.z);
+                            linelen = strlen(line);
+                            strncpy(contents.contents + offset, line, linelen);
+                            offset += linelen;
+                            
+                            //bias count
+                            snprintf(line, linesize, "%hu\r\n", memsCalibrationFrame - memsWarmedUpFrame);
+                            linelen = strlen(line);
+                            strncpy(contents.contents + offset, line, linelen);
+                            offset += linelen;
+             */               
+            
+            //mems data count
+            snprintf(line, linesize, "%u\r\n", programContext->recordData.data[i].recordDataMemsCount);
+            linelen = strlen(line);
+            strncpy(contents.contents + offset, line, linelen);
+            offset += linelen;
+            //mems data
+            for(uint32 memsDataIndex = 0; memsDataIndex < programContext->recordData.data[i].recordDataMemsCount; memsDataIndex++){
+                snprintf(line, linesize, "%hd %hd %hd %hd %hd %hd\r\n", programContext->recordData.data[i].mems[memsDataIndex].accX, programContext->recordData.data[i].mems[memsDataIndex].accY, programContext->recordData.data[i].mems[memsDataIndex].accZ, programContext->recordData.data[i].mems[memsDataIndex].gyroX, programContext->recordData.data[i].mems[memsDataIndex].gyroY, programContext->recordData.data[i].mems[memsDataIndex].gyroZ);
                 linelen = strlen(line);
                 strncpy(contents.contents + offset, line, linelen);
                 offset += linelen;
-                //gyro
-                snprintf(line, linesize, "%u\r\n", module->settings.gyroPrecision);
-                linelen = strlen(line);
-                strncpy(contents.contents + offset, line, linelen);
-                offset += linelen;
-                
-                
-                //module default position
-                snprintf(line, linesize, "%lf %lf %lf\r\n", programContext->recordData.defaultModule[i].defaultWorldPosition64.x, programContext->recordData.defaultModule[i].defaultWorldPosition64.y, programContext->recordData.defaultModule[i].defaultWorldPosition64.z);
-                linelen = strlen(line);
-                strncpy(contents.contents + offset, line, linelen);
-                offset += linelen;
-                
-                //module default world orientation
-                snprintf(line, linesize, "%lf %lf %lf\r\n", programContext->recordData.defaultModule[i].defaultWorldOrientation64.x, programContext->recordData.defaultModule[i].defaultWorldOrientation64.y, programContext->recordData.defaultModule[i].defaultWorldOrientation64.z);
-                linelen = strlen(line);
-                strncpy(contents.contents + offset, line, linelen);
-                offset += linelen;
-                /*
-                                //acc bias lower
-                                snprintf(line, linesize, "%d %d %d\r\n", programContext->modules[i].accelerationBiasLower.x, programContext->modules[i].accelerationBiasLower.y, programContext->modules[i].accelerationBiasLower.z);
-                                linelen = strlen(line);
-                                strncpy(contents.contents + offset, line, linelen);
-                                offset += linelen;
-                                //acc bias
-                                snprintf(line, linesize, "%d %d %d\r\n", programContext->modules[i].accelerationBias.x, programContext->modules[i].accelerationBias.y, programContext->modules[i].accelerationBias.z);
-                                linelen = strlen(line);
-                                strncpy(contents.contents + offset, line, linelen);
-                                offset += linelen;
-                                //acc bias upper
-                                snprintf(line, linesize, "%d %d %d\r\n", programContext->modules[i].accelerationBiasUpper.x, programContext->modules[i].accelerationBiasUpper.y, programContext->modules[i].accelerationBiasUpper.z);
-                                linelen = strlen(line);
-                                strncpy(contents.contents + offset, line, linelen);
-                                offset += linelen;
-                                
-                                //gyro bias lower
-                                snprintf(line, linesize, "%d %d %d\r\n", programContext->modules[i].gyroBiasLower.x, programContext->modules[i].gyroBiasLower.y, programContext->modules[i].gyroBiasLower.z);
-                                linelen = strlen(line);
-                                strncpy(contents.contents + offset, line, linelen);
-                                offset += linelen;
-                                //gyro bias
-                                snprintf(line, linesize, "%d %d %d\r\n", programContext->modules[i].gyroBias.x, programContext->modules[i].gyroBias.y, programContext->modules[i].gyroBias.z);
-                                linelen = strlen(line);
-                                strncpy(contents.contents + offset, line, linelen);
-                                offset += linelen;
-                                //gyro bias upper
-                                snprintf(line, linesize, "%d %d %d\r\n", programContext->modules[i].gyroBiasUpper.x, programContext->modules[i].gyroBiasUpper.y, programContext->modules[i].gyroBiasUpper.z);
-                                linelen = strlen(line);
-                                strncpy(contents.contents + offset, line, linelen);
-                                offset += linelen;
-                                
-                                //bias count
-                                snprintf(line, linesize, "%hu\r\n", memsCalibrationFrame - memsWarmedUpFrame);
-                                linelen = strlen(line);
-                                strncpy(contents.contents + offset, line, linelen);
-                                offset += linelen;
-                 */               
-                
-                //mems data count
-                snprintf(line, linesize, "%u\r\n", programContext->recordData.data[i].recordDataMemsCount);
-                linelen = strlen(line);
-                strncpy(contents.contents + offset, line, linelen);
-                offset += linelen;
-                //mems data
-                for(uint32 memsDataIndex = 0; memsDataIndex < programContext->recordData.data[i].recordDataMemsCount; memsDataIndex++){
-                    snprintf(line, linesize, "%hd %hd %hd %hd %hd %hd\r\n", programContext->recordData.data[i].mems[memsDataIndex].accX, programContext->recordData.data[i].mems[memsDataIndex].accY, programContext->recordData.data[i].mems[memsDataIndex].accZ, programContext->recordData.data[i].mems[memsDataIndex].gyroX, programContext->recordData.data[i].mems[memsDataIndex].gyroY, programContext->recordData.data[i].mems[memsDataIndex].gyroZ);
-                    linelen = strlen(line);
-                    strncpy(contents.contents + offset, line, linelen);
-                    offset += linelen;
-                }
-                
-                //xb data count
-                snprintf(line, linesize, "%u\r\n", programContext->recordData.data[i].recordDataXbCount);
-                linelen = strlen(line);
-                strncpy(contents.contents + offset, line, linelen);
-                offset += linelen;
-                //beacons time divisor
-                snprintf(line, linesize, "%llu\r\n", programContext->beacons[0].timeDivisor);
-                linelen = strlen(line);
-                strncpy(contents.contents + offset, line, linelen);
-                offset += linelen;
-#if METHOD_XBSP
-                //xb data
-                for(uint32 xbDataIndex = 0; xbDataIndex < programContext->recordData.data[i].recordDataXbCount; xbDataIndex++){
-                    snprintf(line, linesize, "%llu %llu %llu %llu\r\n", programContext->recordData.data[i].xb[xbDataIndex].delay[0], programContext->recordData.data[i].xb[xbDataIndex].delay[1],programContext->recordData.data[i].xb[xbDataIndex].delay[1], programContext->recordData.data[i].xb[xbDataIndex].delay[3]);
-                    linelen = strlen(line);
-                    strncpy(contents.contents + offset, line, linelen);
-                    offset += linelen;
-                }
-#endif
-                
             }
+            
+            //xb data count
+            snprintf(line, linesize, "%u\r\n", programContext->recordData.data[i].recordDataXbCount);
+            linelen = strlen(line);
+            strncpy(contents.contents + offset, line, linelen);
+            offset += linelen;
+            //beacons time divisor
+            snprintf(line, linesize, "%llu\r\n", programContext->beacons[0].timeDivisor);
+            linelen = strlen(line);
+            strncpy(contents.contents + offset, line, linelen);
+            offset += linelen;
+#if METHOD_XBSP
+            //xb data
+            for(uint32 xbDataIndex = 0; xbDataIndex < programContext->recordData.data[i].recordDataXbCount; xbDataIndex++){
+                snprintf(line, linesize, "%llu %llu %llu %llu\r\n", programContext->recordData.data[i].xb[xbDataIndex].delay[0], programContext->recordData.data[i].xb[xbDataIndex].delay[1],programContext->recordData.data[i].xb[xbDataIndex].delay[1], programContext->recordData.data[i].xb[xbDataIndex].delay[3]);
+                linelen = strlen(line);
+                strncpy(contents.contents + offset, line, linelen);
+                offset += linelen;
+            }
+#endif
+            
+            
         }
         
         
