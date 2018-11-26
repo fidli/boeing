@@ -243,7 +243,7 @@ static void beaconsPlatform(void *){
         if(!context->freeze && beaconsDomainRoutine != NULL){
             context->beaconsRunning = true;
             beaconsDomainRoutine();
-            context->beaconsRunning = false;
+	            context->beaconsRunning = false;
         }else{
             Sleep(1000);
         }

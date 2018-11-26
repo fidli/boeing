@@ -377,7 +377,7 @@ static bool parseConfig(const char * line){
 }
 
 
-#define IMMEDIATE 1
+#define IMMEDIATE 0
 
 extern "C" void initDomainRoutine(void * memoryStart){
     

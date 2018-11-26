@@ -1,3 +1,0 @@
-TEST-1
-
-raw vs real locomotion formula
