@@ -1,0 +1,6 @@
+TEST-WARMUP
+
+Sleduje prvnich N dat z modulu v klidu. Data v posloupnosti by mela mit podobne hodnoty
+Urcit zahrivaci frame
+
+Entropie?

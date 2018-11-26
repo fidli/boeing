@@ -1,0 +1,11 @@
+set title "ANGLES: RAW vs REAL"
+
+set xlabel "Iteration #"
+set ylabel "Degrees"
+
+set datafile sep ';'
+set term png
+set output "method_err_angles.png"
+
+
+plot 'test_errors.csv' every ::1 using 1:4 with boxes fs solid title 'ABS error [degrees]' linewidth 4 linetype rgb "#f71d1d"

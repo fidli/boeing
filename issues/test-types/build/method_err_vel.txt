@@ -1,0 +1,11 @@
+set title "VELOCITY: RAW vs REAL"
+
+set xlabel "Iteration #"
+set ylabel "Meters/second"
+
+set datafile sep ';'
+set term png
+set output "method_err_vel.png"
+
+
+plot 'test_errors.csv' every ::1 using 1:3 with boxes fs solid title 'ABS error [meters/second]' linewidth 1 linetype rgb "#f71d1d"
