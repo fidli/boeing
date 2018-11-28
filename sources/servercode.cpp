@@ -152,14 +152,9 @@ struct ProgramContext : Common{
         Box_64 xbAABB;
 #endif
         
-        v3_64 defaultGyroBiasLower64;
-        v3_64 defaultGyroBias64;
-        v3_64 defaultGyroBiasUpper64;
-        
-        v3_64 defaultAccelerationBiasLower64;
-        v3_64 defaultAccelerationBias64;
-        v3_64 defaultAccelerationBiasUpper64;
-        
+        dv3_64 defaultGyroBias64;
+        dv3_64 defaultAccelerationBias64;
+                
         v3_64 rotationAngles64;
         v3_64 acceleration64;
         v3_64 velocity64;
@@ -179,14 +174,8 @@ struct ProgramContext : Common{
         v3_64 defaultWorldOrientation64;
         v3_64 defaultWorldPosition64;
         
-        
-        v3_64 gyroBiasLower64;
-        v3_64 gyroBias64;
-        v3_64 gyroBiasUpper64;
-        
-        v3_64 accelerationBiasLower64;
-        v3_64 accelerationBias64;
-        v3_64 accelerationBiasUpper64;
+        dv3_64 gyroBias64;
+        dv3_64 accelerationBias64;
         
         uint32 physicalFrame;
         
@@ -334,15 +323,12 @@ void resetModule(int index, bool haltBoeing = true){
         programContext->beacons[beaconIndex].moduleDistance64[index] = length64(V2_64(module->worldPosition64.x, module->worldPosition64.y) - V2_64(programContext->beacons[beaconIndex].worldPosition64.x, programContext->beacons[beaconIndex].worldPosition64.y));
     }
     
-    /*
-    module->accelerationBiasLower64 = module->defaultAccelerationBiasLower64;
+    
     module->accelerationBias64 = module->defaultAccelerationBias64;
-    module->accelerationBiasUpper64 = module->defaultAccelerationBiasUpper64;
-    
-    module->gyroBiasLower64 = module->defaultGyroBiasLower64;
     module->gyroBias64 = module->defaultGyroBias64;
-    module->gyroBiasUpper64 = module->defaultGyroBiasUpper64;
     
+    
+    /*
     if(programContext->replay){
     
         /*
@@ -1025,8 +1011,8 @@ extern "C" __declspec(dllexport) void initDomainRoutine(void * memoryStart, Imag
 
 extern "C" __declspec(dllexport) void processDomainRoutine(){
     if(!inited || !programContext->inited) return;
-    const uint32 memsCalibrationFrame = 100;
-    const uint32 memsWarmedUpFrame = 30;
+    const uint32 memsCalibrationFrame = 5000;
+    const uint32 memsWarmedUpFrame = 1000;
     
 #if METHOD_XBPNG
     const uint32 xbWarmedUpFrame = 3;
@@ -1252,47 +1238,17 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
             offset += linelen;
 #endif
             
+            //acc expectancy
+            snprintf(line, linesize, "#acc bias(EX)\r\n%hd %hd %hd\r\n", programContext->modules[i].accBias64.x, programContext->modules[i].accBias64.y, programContext->modules[i].accBias64.z);
+            linelen = strlen(line);
+            strncpy(contents.contents + offset, line, linelen);
+            offset += linelen;
             
-            
-            /*
-                            //acc bias lower
-                            snprintf(line, linesize, "%d %d %d\r\n", programContext->modules[i].accelerationBiasLower.x, programContext->modules[i].accelerationBiasLower.y, programContext->modules[i].accelerationBiasLower.z);
-                            linelen = strlen(line);
-                            strncpy(contents.contents + offset, line, linelen);
-                            offset += linelen;
-                            //acc bias
-                            snprintf(line, linesize, "%d %d %d\r\n", programContext->modules[i].accelerationBias.x, programContext->modules[i].accelerationBias.y, programContext->modules[i].accelerationBias.z);
-                            linelen = strlen(line);
-                            strncpy(contents.contents + offset, line, linelen);
-                            offset += linelen;
-                            //acc bias upper
-                            snprintf(line, linesize, "%d %d %d\r\n", programContext->modules[i].accelerationBiasUpper.x, programContext->modules[i].accelerationBiasUpper.y, programContext->modules[i].accelerationBiasUpper.z);
-                            linelen = strlen(line);
-                            strncpy(contents.contents + offset, line, linelen);
-                            offset += linelen;
-                            
-                            //gyro bias lower
-                            snprintf(line, linesize, "%d %d %d\r\n", programContext->modules[i].gyroBiasLower.x, programContext->modules[i].gyroBiasLower.y, programContext->modules[i].gyroBiasLower.z);
-                            linelen = strlen(line);
-                            strncpy(contents.contents + offset, line, linelen);
-                            offset += linelen;
-                            //gyro bias
-                            snprintf(line, linesize, "%d %d %d\r\n", programContext->modules[i].gyroBias.x, programContext->modules[i].gyroBias.y, programContext->modules[i].gyroBias.z);
-                            linelen = strlen(line);
-                            strncpy(contents.contents + offset, line, linelen);
-                            offset += linelen;
-                            //gyro bias upper
-                            snprintf(line, linesize, "%d %d %d\r\n", programContext->modules[i].gyroBiasUpper.x, programContext->modules[i].gyroBiasUpper.y, programContext->modules[i].gyroBiasUpper.z);
-                            linelen = strlen(line);
-                            strncpy(contents.contents + offset, line, linelen);
-                            offset += linelen;
-                            
-                            //bias count
-                            snprintf(line, linesize, "%hu\r\n", memsCalibrationFrame - memsWarmedUpFrame);
-                            linelen = strlen(line);
-                            strncpy(contents.contents + offset, line, linelen);
-                            offset += linelen;
-             */               
+            //gyro expectancy
+            snprintf(line, linesize, "#gyro bias(EX)\r\n%hd %hd %hd\r\n", programContext->modules[i].gyroBias64.x, programContext->modules[i].gyroBias64.y, programContext->modules[i].gyroBias64.z);
+            linelen = strlen(line);
+            strncpy(contents.contents + offset, line, linelen);
+            offset += linelen;
             
             //mems data count
             snprintf(line, linesize, "#mems data count\r\n%u\r\n", programContext->recordData.data[i].recordDataMemsCount);
@@ -1385,7 +1341,6 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
                 while(module->haltProcessing){};
                 module->processHalted = false;
             }
-            
             
             
             
@@ -1495,9 +1450,13 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
                         //this will change, when default orientation change
                         //TODO(): implement when maps include different orientiaiton
                         dv3_64 accDataRotated = DV3_64(data->accY, -data->accX, data->accZ);
+                        dv3_64 gyroData = DV3_64(data->gyroX, data->gyroY, data->gyroZ);
+                        
+
                         
                         if(programContext->localisationType == LocalisationType_Mems_Ori || programContext->localisationType == LocalisationType_Mems_Comb){
-                            module->gyroSum64 += DV3_64(data->gyroX, data->gyroY, data->gyroZ);
+                            //sub the EX value
+                            module->gyroSum64 += gyroData - module->gyroBias64;
                             for(uint8 i = 0; i < 3; i++){
                                 module->gyroSum64.v[i] += degModulo;
                                 module->gyroSum64.v[i] = module->gyroSum64.v[i] % degModulo;
@@ -1516,7 +1475,8 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
                             
                         }
                         if(programContext->localisationType == LocalisationType_Mems_Loco){
-                            module->accSum64 += accDataRotated;
+                            //sub the EX value
+                            module->accSum64 += accDataRotated - module->accBias64;
                             module->acceleration64 = DV3_64(data->accX, data->accY, data->accZ) / accDivisor;
                             module->velocity64 = (module->accSum64/velDivisor)*g;
                             
@@ -1525,83 +1485,26 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
                             module->worldPosition64  = ((module->velSum64*2 - module->accSum64) / pDivisor)*g;
                         }
                         if(programContext->localisationType == LocalisationType_Mems_Comb){
-                            module->acceleration64 = rotationMatrix * (accDataRotated / accDivisor);
+                            v3_64 realBias = rotationMatrix * (module->accBias64 / accDivisor);
+                            module->acceleration64 = rotationMatrix * (accDataRotated / accDivisor) - realBias;
                             module->worldPosition64 += module->velocity64*dt + 0.5*g*dt*dt*module->acceleration64; 
                             module->velocity64 += module->acceleration64*g*dt;
                         }
                         
                         
                     }else if(module->physicalFrame == memsCalibrationFrame){
-                        
-                        /*
-                        mpu6050_gyro32_float64(module->settings, module->gyroBias.x,  module->gyroBias.y,  module->gyroBias.z, &module->gyroBias64.x, &module->gyroBias64.y, &module->gyroBias64.z);
-                        module->gyroBias64 = module->gyroBias64 * (1.0f/(memsCalibrationFrame - memsWarmedUpFrame));
-                        
-                        mpu6050_gyro32_float64(module->settings, module->gyroBiasLower.x,  module->gyroBiasLower.y,  module->gyroBiasLower.z, &module->gyroBiasLower64.x, &module->gyroBiasLower64.y, &module->gyroBiasLower64.z);
-                        module->gyroBiasLower64 -=  module->gyroBias64;
-                        
-                        mpu6050_gyro32_float64(module->settings, module->gyroBiasUpper.x,  module->gyroBiasUpper.y,  module->gyroBiasUpper.z, &module->gyroBiasUpper64.x, &module->gyroBiasUpper64.y, &module->gyroBiasUpper64.z);
-                        module->gyroBiasUpper64 -=  module->gyroBias64;
-                        
-                        
-                        
-                        mpu6050_acc32_float64(module->settings, module->accelerationBias.x,  module->accelerationBias.y,  module->accelerationBias.z, &module->accelerationBias64.x, &module->accelerationBias64.y, &module->accelerationBias64.z);
-                        module->accelerationBias64 = module->accelerationBias64 * (1.0f/(memsCalibrationFrame - memsWarmedUpFrame));
-                        
-                        mpu6050_acc32_float64(module->settings, module->accelerationBiasLower.x,  module->accelerationBiasLower.y,  module->accelerationBiasLower.z, &module->accelerationBiasLower64.x, &module->accelerationBiasLower64.y, &module->accelerationBiasLower64.z);
-                        module->accelerationBiasLower64 -=  module->accelerationBias64;
-                        
-                        mpu6050_acc32_float64(module->settings, module->accelerationBiasUpper.x,  module->accelerationBiasUpper.y,  module->accelerationBiasUpper.z, &module->accelerationBiasUpper64.x, &module->accelerationBiasUpper64.y, &module->accelerationBiasUpper64.z);
-                        module->accelerationBiasUpper64 -=  module->accelerationBias64;
-                        
-                        //yz plane is x rotation (roll)
-                        v2_64 downward = V2_64(0,-1);
-                        v2_64 deltaX = V2_64(module->accelerationBias64.y, module->accelerationBias64.z);
-                        
-                        //y,x plane is z rotation (yaw)
-                        v2_64 forward = V2_64(0, -1);
-                        v2_64 deltaZ = V2_64(module->accelerationBias64.y, module->accelerationBias64.x);
-                        
-                        //x, z plane is y rotation (pitch)
-                        v2_64 deltaY = V2_64(module->accelerationBias64.x, module->accelerationBias64.z);
-                        
-                        float64 rotationX = 180 - radToDeg64(radAngle64(deltaX, downward));
-                        float64 rotationY = 180 - radToDeg64(radAngle64(deltaZ, forward));
-                        float64 rotationZ = 180 - radToDeg64(radAngle64(deltaY, downward));
-                        
-                        module->rotationAngles64 = V3_64(rotationX, -rotationY, -rotationZ);
-                        
-                        v4_64 quatX = Quat64(V3_64(1, 0, 0), degToRad64(-module->rotationAngles64.x));
-                        v4_64 quatY = Quat64(V3_64(0, 1, 0), degToRad64(-module->rotationAngles64.y));
-                        v4_64 quatZ = Quat64(V3_64(0, 0, 1), degToRad64(-module->rotationAngles64.z));
-                        
-                        mat4_64 rotationMatrix  = quaternionToMatrix64(quatX * quatY * quatZ);
-                        
-                        module->worldOrientation64 = rotationMatrix * module->worldOrientation64;
-                        */
+                        module->accBias64 /= memsCalibrationFrame - memsWarmedUpFrame;
+                        module->gyroBias64 /= memsCalibrationFrame - memsWarmedUpFrame;
                         module->calibrated = true;
                     }else{
                         if(module->physicalFrame > memsWarmedUpFrame){
-                            //gather data?
-                            /*
-                            module->gyroBias += {data->gyroX, data->gyroY, data->gyroZ};
-                            module->accelerationBias += {data->accX, data->accY, data->accZ};
-                            for(uint8 i = 0; i < 3; i++){
-                                module->gyroBiasLower.v[i] = MIN(module->gyroBiasLower.v[i], data->gyro.v[i]);
-                                module->gyroBiasUpper.v[i] = MAX(module->gyroBiasUpper.v[i], data->gyro.v[i]);
-                                
-                                module->accelerationBiasLower.v[i] = MIN(module->accelerationBiasLower.v[i], data->acc.v[i]);
-                                module->accelerationBiasUpper.v[i] = MAX(module->accelerationBiasUpper.v[i], data->acc.v[i]);
-                            }*/
+                           //NOTE(AK) gather data?
+                            module->accBias64 += DV3_64(data->accX, data->accY, data->accZ);
+                            module->gyroBias64 += DV3_64(data->gyroX, data->gyroY, data->gyroZ);
                         }else if(module->physicalFrame == memsWarmedUpFrame){
-                            /*module->gyroBiasLower = {data->gyroX, data->gyroY, data->gyroZ};
-                            module->gyroBias = module->gyroBiasLower;
-                            module->gyroBiasUpper = module->gyroBiasLower;
-                            
-                            module->accelerationBiasLower = {data->accX, data->accY, data->accZ};
-                            module->accelerationBias = module->accelerationBiasLower;
-                            module->accelerationBiasUpper = module->accelerationBiasLower;
-                            */
+                            //NOTE(AK) init data gathering
+                            module->gyroBias = {};
+                            module->accBias = {};
                         }
                         
                     }
