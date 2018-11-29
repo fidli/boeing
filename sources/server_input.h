@@ -10,6 +10,7 @@ struct ServerInput{
     bool method3;
     bool method4;
     
+    bool reposition;
     bool record;
     bool help;
 };

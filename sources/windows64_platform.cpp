@@ -213,6 +213,9 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
                 case 0x48:{ //'h'
                     input.help = true;
                 }break;
+                case 0x50:{ //'p'
+                    input.reposition = true;
+                }break;
                 
             };
         }break;
@@ -243,7 +246,7 @@ static void beaconsPlatform(void *){
         if(!context->freeze && beaconsDomainRoutine != NULL){
             context->beaconsRunning = true;
             beaconsDomainRoutine();
-	            context->beaconsRunning = false;
+            context->beaconsRunning = false;
         }else{
             Sleep(1000);
         }
