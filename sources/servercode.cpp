@@ -887,124 +887,146 @@ extern "C" __declspec(dllexport) void initDomainRoutine(void * memoryStart, Imag
             result = result && readFile(replayFile, &contents);
             ASSERT(result);
             char line[1024];
-            
+           
             //beacon names
-            //beacon positions
-            
-            
-            //each module
-            
-            //module name
-            //module settings - sample rate, xb rate, sensitivity
-            //module default position & world orientation
-            
-            //acc bias lower
-            //acc bias
-            //acc bias upper
-            
-            //gyro bias lower
-            //gyro bias
-            //gyro bias upper
-            
-            //bias count
-            
-            //mems data count
-            //mems data
-            
-            //xb data count
-            //beacons timeDivisor
-            //xb data
-            
-            //beacon names
-            result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%8s %8s %8s %8s", &programContext->beacons[0].sidLower, &programContext->beacons[1].sidLower, &programContext->beacons[2].sidLower, &programContext->beacons[3].sidLower) == 4;
+            result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && getNextLine(&contents, line, ARRAYSIZE(line))  && sscanf(line, "%8s %8s %8s %8s", &programContext->beacons[0].sidLower, &programContext->beacons[1].sidLower, &programContext->beacons[2].sidLower, &programContext->beacons[3].sidLower) == 4;
             
             //beacon position x
-            result = result && getNextLine(&contents, line, ARRAYSIZE(line));
-            
+            result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && getNextLine(&contents, line, ARRAYSIZE(line));
             result = result && sscanf(line, "%lf %lf %lf %lf", &programContext->beacons[0].worldPosition64.x, &programContext->beacons[1].worldPosition64.x, &programContext->beacons[2].worldPosition64.x, &programContext->beacons[3].worldPosition64.x) == 4;
             
             //beacon position y
-            result = result && getNextLine(&contents, line, ARRAYSIZE(line));
-            
+            result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && getNextLine(&contents, line, ARRAYSIZE(line));
             result = result &&sscanf(line, "%lf %lf %lf %lf", &programContext->beacons[0].worldPosition64.y, &programContext->beacons[1].worldPosition64.y, &programContext->beacons[2].worldPosition64.y, &programContext->beacons[3].worldPosition64.y) == 4;
             
             //beacon position z
-            result = result && getNextLine(&contents, line, ARRAYSIZE(line));
-            
+            result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && getNextLine(&contents, line, ARRAYSIZE(line));
             result = result && sscanf(line, "%lf %lf %lf %lf", &programContext->beacons[0].worldPosition64.z, &programContext->beacons[1].worldPosition64.z, &programContext->beacons[2].worldPosition64.z, &programContext->beacons[3].worldPosition64.z) == 4;
             
+            //beacons time divisor
+            result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%llu", &programContext->beacons[0].timeDivisor) == 1;
+            programContext->beacons[3].timeDivisor = programContext->beacons[2].timeDivisor = programContext->beacons[1].timeDivisor = programContext->beacons[0].timeDivisor; 
             
-            for(uint8 moduleIndex = 0; moduleIndex < 2; moduleIndex++){
+ 
+            uint64 moduleCount = 0;
+            //module heads
+            result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%llu", &moduleCount) == 1;
+           
+            
+            for(uint64 moduleIndex = 0; moduleIndex < moduleCount; moduleIndex++){
                 ProgramContext::Module * module = &programContext->modules[moduleIndex];
                 //module name
-                if(getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%1c", &module->name) == 1){
+                if(getNextLine(&contents, line, ARRAYSIZE(line)) && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%1c", &module->name) == 1){
                     module->run = true;
                     //mems rate
-                    result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%hu", &module->settings.sampleRate) == 1;
+                    result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%hu", &module->settings.sampleRate) == 1;
 #if METHOD_XBSP
                     //xbPeriod
-                    result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%f", &module->xbPeriod) == 1;
+                    result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%f", &module->xbPeriod) == 1;
 #endif
                     //acc
-                    result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%u", &module->settings.accPrecision) == 1;
+                    result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%u", &module->settings.accPrecision) == 1;
                     //gyro
-                    result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%u", &module->settings.gyroPrecision) == 1;
+                    result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%u", &module->settings.gyroPrecision) == 1;
                     
                     //default pos
-                    result = result && getNextLine(&contents, line, ARRAYSIZE(line));
-                    
+                    result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && getNextLine(&contents, line, ARRAYSIZE(line));
                     result = result && sscanf(line, "%lf %lf %lf", &module->defaultWorldPosition64.x, &module->defaultWorldPosition64.y, &module->defaultWorldPosition64.z) == 3;
                     
                     //default World orientation
-                    result = result && getNextLine(&contents, line, ARRAYSIZE(line));
-                    
+                    result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && getNextLine(&contents, line, ARRAYSIZE(line));
                     result = result && sscanf(line, "%lf %lf %lf", &module->defaultWorldOrientation64.x, &module->defaultWorldOrientation64.y, &module->defaultWorldOrientation64.z) == 3;
                     
-                    /*
-                    //acc bias lower
-                    result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%d %d %d", &module->defaultAccelerationBiasLower.x, &module->defaultAccelerationBiasLower.y, &module->defaultAccelerationBiasLower64.z) == 3;
-                    //acc bias
-                    result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%d %d %d", &module->defaultAccelerationBias.x, &module->defaultAccelerationBias.y, &module->defaultAccelerationBias64.z) == 3;
-                    //acc bias upper
-                    result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%d %d %d", &module->defaultAccelerationBiasUpper64.x, &module->defaultAccelerationBiasUpper.y, &module->defaultAccelerationBiasUpper64.z) == 3;
+                    //default acc raw
+                    result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && getNextLine(&contents, line, ARRAYSIZE(line));
+                    result = result && sscanf(line, "%lld %lld %lld", &module->defaultAccSum64.x, &module->defaultAccSum64.y, &module->defaultAccSum64.z) == 3;
+
+                    //default vel raw
+                    result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && getNextLine(&contents, line, ARRAYSIZE(line));
+                    result = result && sscanf(line, "%lld %lld %lld", &module->defaultVelSum64.x, &module->defaultVelSum64.y, &module->defaultVelSum64.z) == 3;
                     
-                    //gyro bias lower
-                    result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%d %d %d", &module->defaultGyroBiasLower64.x, &module->defaultGyroBiasLower64.y, &module->defaultGyroBiasLower64.z) == 3;
-                    //gyro bias
-                    result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%d %d %d", &module->defaultGyroBias64.x, &module->defaultGyroBias64.y, &module->defaultGyroBias64.z) == 3;
-                    //gyro bias upper
-                    result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%d %d %d", &module->defaultGyroBiasUpper64.x, &module->defaultGyroBiasUpper64.y, &module->defaultGyroBiasUpper64.z) == 3;
+                    //default gyro raw
+                    result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && getNextLine(&contents, line, ARRAYSIZE(line));
+                    result = result && sscanf(line, "%lld %lld %lld", &module->defaultGyroSum64.x, &module->defaultGyroSum64.y, &module->defaultGyroSum64.z) == 3;
                     
-                    //bias count
-                    result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%hu", &programContext->recordData.defaultModule[moduleIndex].biasCount) == 1;                    
-                    */
+                    uint32 memsWarmupFrame;
+                    uint32 memsCalibrationFrame;
+                    uint32 xbWarmupFrame;
+                    uint32 xbCalibrationFrame;
                     
+                    //mems warmupframe
+                    result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%u", &memsWarmupFrame) == 1;
+                    
+                    //mems calibration
+                    result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%u", &memsCalibrationFrame) == 1;
+                    
+                    //mems starting frame
+                    result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%u", &module->physicalFrame) == 1;
+                    
+                    //xb warmupframe
+                    result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%u", &xbWarmupFrame) == 1;
+                    
+                    //xb calibration
+                    result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%u", &xbCalibrationFrame) == 1;
+                    
+#if METHOD_XBSP
+            //xb starting frame
+                    result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%u", &module->xbFrame) == 1;
+#endif
+#if METHOD_XBPNG
+            //xb starting frames
+                    result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%u %u %u %u", &module->xbFrames[0], &module->xbFrames[1], &module->xbFrames[2], &module->xbFrames[3]) == 1;
+#endif                    
+
+                    
+                    //acc expectncy raw
+                    result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && getNextLine(&contents, line, ARRAYSIZE(line));
+                    result = result && sscanf(line, "%lld %lld %lld", &module->accBias64.x, &module->accBias64.y, &module->accBias64.z) == 3;
+
+                    //acc std dev raw
+                    result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && getNextLine(&contents, line, ARRAYSIZE(line));
+                    result = result && sscanf(line, "%lld %lld %lld", &module->accVar64.x, &module->accVar64.y, &module->accVar64.z) == 3;
+
+                    //gyro expectncy raw
+                    result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && getNextLine(&contents, line, ARRAYSIZE(line));
+                    result = result && sscanf(line, "%lld %lld %lld", &module->gyroBias64.x, &module->gyroBias64.y, &module->gyroBias64.z) == 3;
+
+                    //gyro std dev raw
+                    result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && getNextLine(&contents, line, ARRAYSIZE(line));
+                    result = result && sscanf(line, "%lld %lld %lld", &module->gyroVar64.x, &module->gyroVar64.y, &module->gyroVar64.z) == 3;
+
                     //mems data count
-                    result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%u", &programContext->recordData.data[moduleIndex].recordDataMemsCount) == 1;
+                    result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%u", &programContext->recordData.data[moduleIndex].recordDataMemsCount) == 1;
+                                    
+                    //xb data count
+                    result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%u", &programContext->recordData.data[moduleIndex].recordDataXbCount) == 1;
                     
+                }
+                //module heads
+                result = result && getNextLine(&contents, line, ARRAYSIZE(line));
+                
+                for(uint64 moduleIndex = 0; moduleIndex < moduleCount; moduleIndex++){
+                    ProgramContext::Module * module = &programContext->modules[moduleIndex];
+                    //module name
+                    char moduleName = 0;
+                    if(getNextLine(&contents, line, ARRAYSIZE(line)) && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%1c", &moduleName) == 1){
+                        ASSERT(moduleName == module->name);
+                        //mems data
+                        result = result && getNextLine(&contents, line, ARRAYSIZE(line));
+                        
                     //mems data
                     for(uint32 di = 0; di < programContext->recordData.data[moduleIndex].recordDataMemsCount; di++){
                         result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%hd %hd %hd %hd %hd %hd", &programContext->recordData.data[moduleIndex].mems[di].accX, &programContext->recordData.data[moduleIndex].mems[di].accY, &programContext->recordData.data[moduleIndex].mems[di].accZ, &programContext->recordData.data[moduleIndex].mems[di].gyroX, &programContext->recordData.data[moduleIndex].mems[di].gyroY, &programContext->recordData.data[moduleIndex].mems[di].gyroZ) == 6;
-                        
-                        
                     }
-                    
-                    
-                    //xb data count
-                    result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%u", &programContext->recordData.data[moduleIndex].recordDataXbCount) == 1;
-                    
-                    //beacons time divisor count
-                    result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%llu", &programContext->beacons[0].timeDivisor) == 1;
-                    programContext->beacons[3].timeDivisor = programContext->beacons[2].timeDivisor = programContext->beacons[1].timeDivisor = programContext->beacons[0].timeDivisor; 
-                    
-#if METHOD_XBSP
+                        //xb data
+                        result = result && getNextLine(&contents, line, ARRAYSIZE(line));
+                        
                     //xb data
                     for(uint32 di = 0; di < programContext->recordData.data[moduleIndex].recordDataXbCount; di++){
                         result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%llu %llu %llu %llu", &programContext->recordData.data[moduleIndex].xb[di].delay[0], &programContext->recordData.data[moduleIndex].xb[di].delay[1], &programContext->recordData.data[moduleIndex].xb[di].delay[2], &programContext->recordData.data[moduleIndex].xb[di].delay[3]) == 4;
-                        
-                        
                     }
-#endif
+                    }
+                }
                     module->boeingHalted = true;
                     module->beaconsHalted = true;
                     module->processHalted = true;
@@ -1153,7 +1175,7 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
         
         
         //module heads
-        snprintf(line, linesize, "#------------------------------------\r\n#module headers\r\n%llu\r\n", ARRAYSIZE(programContext->modules));
+        snprintf(line, linesiz/e, "#------------------------------------\r\n#module headers\r\n%llu\r\n", ARRAYSIZE(programContext->modules));
         linelen = strlen(line);
         strncpy(contents.contents + offset, line, linelen);
         offset += linelen;
@@ -1203,19 +1225,19 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
             offset += linelen;
             
             //module default acc raw
-            snprintf(line, linesize, "#default acc sum raw\r\n%llu %llu %llu\r\n", programContext->recordData.defaultModule[i].defaultAccSum64.x, programContext->recordData.defaultModule[i].defaultAccSum64.y, programContext->recordData.defaultModule[i].defaultAccSum64.z);
+            snprintf(line, linesize, "#default acc sum raw\r\n%lld %lld %lld\r\n", programContext->recordData.defaultModule[i].defaultAccSum64.x, programContext->recordData.defaultModule[i].defaultAccSum64.y, programContext->recordData.defaultModule[i].defaultAccSum64.z);
             linelen = strlen(line);
             strncpy(contents.contents + offset, line, linelen);
             offset += linelen;
             
             //module default vel raw
-            snprintf(line, linesize, "#default vel sum raw\r\n%llu %llu %llu\r\n", programContext->recordData.defaultModule[i].defaultVelSum64.x, programContext->recordData.defaultModule[i].defaultVelSum64.y, programContext->recordData.defaultModule[i].defaultVelSum64.z);
+            snprintf(line, linesize, "#default vel sum raw\r\n%lld %lld %lld\r\n", programContext->recordData.defaultModule[i].defaultVelSum64.x, programContext->recordData.defaultModule[i].defaultVelSum64.y, programContext->recordData.defaultModule[i].defaultVelSum64.z);
             linelen = strlen(line);
             strncpy(contents.contents + offset, line, linelen);
             offset += linelen;
             
             //module default gyro raw
-            snprintf(line, linesize, "#default gyro sum raw\r\n%llu %llu %llu\r\n", programContext->recordData.defaultModule[i].defaultGyroSum64.x, programContext->recordData.defaultModule[i].defaultGyroSum64.y, programContext->recordData.defaultModule[i].defaultGyroSum64.z);
+            snprintf(line, linesize, "#default gyro sum raw\r\n%lld %lld %lld\r\n", programContext->recordData.defaultModule[i].defaultGyroSum64.x, programContext->recordData.defaultModule[i].defaultGyroSum64.y, programContext->recordData.defaultModule[i].defaultGyroSum64.z);
             linelen = strlen(line);
             strncpy(contents.contents + offset, line, linelen);
             offset += linelen;
@@ -1303,10 +1325,7 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
             linelen = strlen(line);
             strncpy(contents.contents + offset, line, linelen);
             offset += linelen;
-            
-            
-            
-            
+           
         }
         //module heads
         snprintf(line, linesize, "#module data\r\n");
