@@ -1,0 +1,46 @@
+set xlabel "Sensor values"
+set ylabel "Count"
+set datafile sep ' '
+set term png
+
+
+set title "HENRY GRAIN: 20000-22000th frame"
+
+set output "henry_1.png"
+plot "henry.rec" u ($1):(1) smooth freq w boxes t "ACC X"
+
+set output "henry_2.png"
+plot "henry.rec" u ($2):(1) smooth freq w boxes t "ACC Y"
+
+set output "henry_3.png"
+plot "henry.rec" u ($3):(1) smooth freq w boxes t "ACC Z"
+
+set output "henry_4.png"
+plot "henry.rec" u ($4):(1) smooth freq w boxes t "GYRO X"
+
+set output "henry_5.png"
+plot "henry.rec" u ($5):(1) smooth freq w boxes t "GYRO Y"
+
+set output "henry_6.png"
+plot "henry.rec" u ($6):(1) smooth freq w boxes t "GYRO Z"
+
+
+set title "ROLLO GRAIN: 20000-22000th frame"
+
+set output "rollo_1.png"
+plot "rollo.rec" u ($1):(1) smooth freq w boxes t "ACC X"
+
+set output "rollo_2.png"
+plot "rollo.rec" u ($2):(1) smooth freq w boxes t "ACC Y"
+
+set output "rollo_3.png"
+plot "rollo.rec" u ($3):(1) smooth freq w boxes t "ACC Z"
+
+set output "rollo_4.png"
+plot "rollo.rec" u ($4):(1) smooth freq w boxes t "GYRO X"
+
+set output "rollo_5.png"
+plot "rollo.rec" u ($5):(1) smooth freq w boxes t "GYRO Y"
+
+set output "rollo_6.png"
+plot "rollo.rec" u ($6):(1) smooth freq w boxes t "GYRO Z"

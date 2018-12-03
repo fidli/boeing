@@ -132,7 +132,7 @@ struct ProgramContext : Common{
         MPU6050Settings settings;
         char sidLower[9];
         
-        MemsData memsData[86];
+        MemsData memsData[30000];
         int32 memsTailIndex;
         int32 memsHeadIndex;
         int32 memsStepsAvailable;
@@ -286,12 +286,12 @@ struct ProgramContext : Common{
 };
 
 
-const uint32 memsCalibrationFrame = 5000;
-const uint32 memsWarmedUpFrame = 1000;
+const uint32 memsCalibrationFrame = 10000;
+const uint32 memsWarmedUpFrame = 20000;
 
 #if METHOD_XBPNG
-const uint32 xbWarmedUpFrame = 3;
-const uint32 xbCalibrationFrame = 10;
+const uint32 xbWarmedUpFrame = 0;
+const uint32 xbCalibrationFrame = 0;
 #endif
 
 
@@ -540,7 +540,7 @@ extern "C" __declspec(dllexport) void boeingDomainRoutine(int index){
                             break;
                         }
                     }
-                    
+                                      
                     ASSERT(accumulated == wrap->data.length);
                     
                     for(uint32 offset = 0; offset < wrap->data.length; offset += sizeof(MemsData)){
@@ -548,21 +548,24 @@ extern "C" __declspec(dllexport) void boeingDomainRoutine(int index){
                         MemsData * target = &module->memsData[module->memsHeadIndex];
                         
                         uint32 suboffset = 0;
-                        target->accX = ((uint16)(*(module->memsDataBuffer + offset + suboffset)) << 8) + *(module->memsDataBuffer + offset + suboffset + 1);
+                        target->accX = ((int16)(*(module->memsDataBuffer + offset + suboffset)) << 8) + *(module->memsDataBuffer + offset + suboffset + 1);
                         suboffset += 2;
-                        target->accY = ((uint16)(*(module->memsDataBuffer + offset + suboffset)) << 8) + *(module->memsDataBuffer + offset + suboffset + 1);
+                        target->accY = ((int16)(*(module->memsDataBuffer + offset + suboffset)) << 8) + *(module->memsDataBuffer + offset + suboffset + 1);
                         suboffset += 2;
-                        target->accZ = ((uint16)(*(module->memsDataBuffer + offset + suboffset)) << 8) + *(module->memsDataBuffer + offset + suboffset + 1);
+                        target->accZ = ((int16)(*(module->memsDataBuffer + offset + suboffset)) << 8) + *(module->memsDataBuffer + offset + suboffset + 1);
                         
                         suboffset += 2;
-                        target->gyroX = ((uint16)(*(module->memsDataBuffer + offset + suboffset)) << 8) + *(module->memsDataBuffer + offset + suboffset + 1);
+                        target->gyroX = ((int16)(*(module->memsDataBuffer + offset + suboffset)) << 8) + *(module->memsDataBuffer + offset + suboffset + 1);
                         suboffset += 2;
-                        target->gyroY = ((uint16)(*(module->memsDataBuffer + offset + suboffset)) << 8) + *(module->memsDataBuffer + offset + suboffset + 1);
+                        target->gyroY = ((int16)(*(module->memsDataBuffer + offset + suboffset)) << 8) + *(module->memsDataBuffer + offset + suboffset + 1);
                         suboffset += 2;
-                        target->gyroZ = ((uint16)(*(module->memsDataBuffer + offset + suboffset)) << 8) + *(module->memsDataBuffer + offset + suboffset + 1);
+                        target->gyroZ = ((int16)(*(module->memsDataBuffer + offset + suboffset)) << 8) + *(module->memsDataBuffer + offset + suboffset + 1);
+                        
                         
                         module->memsHeadIndex = (module->memsHeadIndex + 1) % ARRAYSIZE(module->memsData);
                         FETCH_AND_ADD(&module->memsStepsAvailable, 1);
+                        
+                        
                     }
                     module->accumulatedSize = 0;
                 }
@@ -718,7 +721,7 @@ extern "C" __declspec(dllexport) void serverDomainRoutine(){
                     bool found = false;
                     uint32 i = 0;
                     for(; i < ARRAYSIZE(programContext->modules); i++){
-                        if(!programContext->modules[i].run){
+                        if(!programContext->modules[i].run && (wrap->init.boeing.name - '1') == i){
                             found = true;
                             break;
                         }
@@ -1023,9 +1026,9 @@ extern "C" __declspec(dllexport) void initDomainRoutine(void * memoryStart, Imag
                         
                     //xb data
                     for(uint32 di = 0; di < programContext->recordData.data[moduleIndex].recordDataXbCount; di++){
-                        result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%llu %llu %llu %llu", &programContext->recordData.data[moduleIndex].xb[di].delay[0], &programContext->recordData.data[moduleIndex].xb[di].delay[1], &programContext->recordData.data[moduleIndex].xb[di].delay[2], &programContext->recordData.data[moduleIndex].xb[di].delay[3]) == 4;
+//                        result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%llu %llu %llu %llu", &programContext->recordData.data[moduleIndex].xb[di].delay[0], &programContext->recordData.data[moduleIndex].xb[di].delay[1], &programContext->recordData.data[moduleIndex].xb[di].delay[2], &programContext->recordData.data[moduleIndex].xb[di].delay[3]) == 4;
                     }
-                    }
+                    
                 }
                     module->boeingHalted = true;
                     module->beaconsHalted = true;
@@ -1132,6 +1135,7 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
             }
         }
     }else if(!record && programContext->wasRecord){
+        
         //START OF RECORD SAVE
         FileContents contents;
         contents.contents = programContext->tempRecordContents;
@@ -1175,7 +1179,7 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
         
         
         //module heads
-        snprintf(line, linesiz/e, "#------------------------------------\r\n#module headers\r\n%llu\r\n", ARRAYSIZE(programContext->modules));
+        snprintf(line, linesize, "#------------------------------------\r\n#module headers\r\n%llu\r\n", ARRAYSIZE(programContext->modules));
         linelen = strlen(line);
         strncpy(contents.contents + offset, line, linelen);
         offset += linelen;
@@ -1303,13 +1307,13 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
             offset += linelen;
             
             //gyro expectancy
-            snprintf(line, linesize, "#gyro bias(EX)\r\n%lldd %lldd %lldd\r\n", programContext->modules[i].gyroBias64.x, programContext->modules[i].gyroBias64.y, programContext->modules[i].gyroBias64.z);
+            snprintf(line, linesize, "#gyro bias(EX)\r\n%lld %lld %lld\r\n", programContext->modules[i].gyroBias64.x, programContext->modules[i].gyroBias64.y, programContext->modules[i].gyroBias64.z);
             linelen = strlen(line);
             strncpy(contents.contents + offset, line, linelen);
             offset += linelen;
 
             //gyro std deviation
-            snprintf(line, linesize, "#gyro std deviation(sqrt(varX))\r\n%lldd %lldd %lldd\r\n", programContext->modules[i].gyroVar64.x, programContext->modules[i].gyroVar64.y, programContext->modules[i].gyroVar64.z);
+            snprintf(line, linesize, "#gyro std deviation(sqrt(varX))\r\n%lld %lld %lld\r\n", programContext->modules[i].gyroVar64.x, programContext->modules[i].gyroVar64.y, programContext->modules[i].gyroVar64.z);
             linelen = strlen(line);
             strncpy(contents.contents + offset, line, linelen);
             offset += linelen;
@@ -1361,7 +1365,7 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
             //xb data
             for(uint32 xbDataIndex = 0; xbDataIndex < programContext->recordData.data[i].recordDataXbCount; xbDataIndex++){
                 snprintf(line, linesize, "%lf %llu %llu %llu %llu\r\n",
-                         programContext->recordData.data[i].xb[xbDataIndex].timeReceived - module->timeConnected, programContext->recordData.data[i].xb[xbDataIndex].delay[0], programContext->recordData.data[i].xb[xbDataIndex].delay[1],programContext->recordData.data[i].xb[xbDataIndex].delay[1], programContext->recordData.data[i].xb[xbDataIndex].delay[3]);
+                         programContext->recordData.data[i].xb[xbDataIndex].timeReceived - module->timeConnected, programContext->recordData.data[i].xb[xbDataIndex].delay[0], programContext->recordData.data[i].xb[xbDataIndex].delay[1], programContext->recordData.data[i].xb[xbDataIndex].delay[2], programContext->recordData.data[i].xb[xbDataIndex].delay[3]);
                 linelen = strlen(line);
                 strncpy(contents.contents + offset, line, linelen);
                 offset += linelen;
@@ -1414,17 +1418,21 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
             }
             
             ASSERT(memsSteps[i] >= 0);
+            ASSERT(memsSteps[i] <= ARRAYSIZE(module->memsData));
             ASSERT(xbSteps[i] >= 0);
+            ASSERT(xbSteps[i] <= ARRAYSIZE(module->xbData));
             if(record){
                 int32 memsTargetHead = module->memsHeadIndex;
-                for(; programContext->recordData.data[i].memsRecordHeadIndex != memsTargetHead; programContext->recordData.data[i].memsRecordHeadIndex = (programContext->recordData.data[i].memsRecordHeadIndex + 1) % ARRAYSIZE(ProgramContext::Module::memsData)){
+                ASSERT((module->memsHeadIndex - module->memsTailIndex + ARRAYSIZE(module->memsData)) % ARRAYSIZE(module->memsData) <= module->memsStepsAvailable);
+                ASSERT((module->xbHeadIndex - module->xbTailIndex + ARRAYSIZE(module->xbData)) % ARRAYSIZE(module->xbData) <= module->xbStepsAvailable);
+                for(; programContext->recordData.data[i].memsRecordHeadIndex != memsTargetHead; programContext->recordData.data[i].memsRecordHeadIndex = (programContext->recordData.data[i].memsRecordHeadIndex + 1) % ARRAYSIZE(module->memsData)){
                     programContext->recordData.data[i].mems[programContext->recordData.data[i].recordDataMemsCount] = module->memsData[programContext->recordData.data[i].memsRecordHeadIndex];
                     programContext->recordData.data[i].recordDataMemsCount++;
                     ASSERT(programContext->recordData.data[i].recordDataMemsCount < ARRAYSIZE(programContext->recordData.data[i].mems));
                 }
                 int32 xbTargetHead = module->xbHeadIndex;
-                for(; programContext->recordData.data[i].xbRecordHeadIndex != xbTargetHead; programContext->recordData.data[i].xbRecordHeadIndex = (programContext->recordData.data[i].xbRecordHeadIndex + 1) % ARRAYSIZE(ProgramContext::Module::xbData)){
-                    programContext->recordData.data[i].xb[programContext->recordData.data[i].recordDataXbCount] = module->xbData[programContext->recordData.data[i].memsRecordHeadIndex];
+                for(; programContext->recordData.data[i].xbRecordHeadIndex != xbTargetHead; programContext->recordData.data[i].xbRecordHeadIndex = (programContext->recordData.data[i].xbRecordHeadIndex + 1) % ARRAYSIZE(module->xbData)){
+                    programContext->recordData.data[i].xb[programContext->recordData.data[i].recordDataXbCount] = module->xbData[programContext->recordData.data[i].xbRecordHeadIndex];
                     programContext->recordData.data[i].recordDataXbCount++;
                     ASSERT(programContext->recordData.data[i].recordDataXbCount < ARRAYSIZE(programContext->recordData.data[i].xb));
                 }
@@ -1444,10 +1452,9 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
             
             if(module->run){
                 //wash out xb steps
-#if METHOD_XBSP
                 FETCH_AND_ADD(&module->xbStepsAvailable, -xbSteps[i]);
                 module->xbTailIndex = (module->xbTailIndex + xbSteps[i]) % ARRAYSIZE(module->xbData); 
-#endif
+
                 if(dt == 0){
                     //NOTE(AK): assuming all modules have same sampling frequency
                     stepsAmount = memsSteps[i];
@@ -1547,7 +1554,7 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
                             
                         }
                         if(programContext->localisationType == LocalisationType_Mems_Loco){
-//                            if(length64(accDataCleared) > 0){
+/*//                            if(length64(accDataCleared) > 0){
                             //friction
                             v3_64 frictionCoef = {0.0f, 0.0f, 0.000f};
                             v3_64 biasForFriction = length64(module->accBias64) * normalize64(accDataCleared);
@@ -1559,7 +1566,7 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
                                 }
                                                                 
   //                          }
-                            
+  */                          
                             module->accSum64 += accDataCleared;
                             module->acceleration64 = accDataCleared / accDivisor;
                             module->velocity64 = (module->accSum64/velDivisor)*g;
@@ -2773,6 +2780,9 @@ extern "C" __declspec(dllexport) void renderDomainRoutine(){
         offset.y += fontSize*2;
         
         printToBitmap(programContext->renderingTarget, offset.x, offset.y, "[R] Start/stop/restart recording", &programContext->font, fontSize, white);
+        offset.y += fontSize;
+        
+        printToBitmap(programContext->renderingTarget, offset.x, offset.y, "[P] reposition modules", &programContext->font, fontSize, white);
         offset.y += fontSize;
         
         printToBitmap(programContext->renderingTarget, offset.x, offset.y, "[1] Show module 1 detail", &programContext->font, fontSize, white);

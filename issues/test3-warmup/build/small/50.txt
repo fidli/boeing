@@ -1,0 +1,15 @@
+
+
+set xlabel "Iteration #"
+set ylabel "Entropy"
+
+set datafile sep ' '
+set term png
+
+set output "henry_50.png"
+set title "HENRY: MEMS entropy 50 frames window"
+plot 'henry_50.csv' using 1:2 with lines t "ACC X", '' using 1:3 with lines t "ACC Y", '' using 1:4 with lines t "ACC Z", '' using 1:5 with lines t "GYRO X", '' using 1:6 with lines t "GYRO Y", '' using 1:7 with lines t "GYRO Z"
+
+set output "rollo_50.png"
+set title "ROLLO: MEMS entropy 50 frames window"
+plot 'rollo_50.csv' using 1:2 with lines t "ACC X", '' using 1:3 with lines t "ACC Y", '' using 1:4 with lines t "ACC Z", '' using 1:5 with lines t "GYRO X", '' using 1:6 with lines t "GYRO Y", '' using 1:7 with lines t "GYRO Z"

@@ -1,0 +1,15 @@
+
+
+set xlabel "Iteration #"
+set ylabel "value"
+
+set datafile sep ';'
+set term png
+
+set output "henry_valuesx.png"
+set title "HENRY: MEMS values"
+plot 'henry_values.csv' using 1:2 with lines t "ACC X"
+
+set output "rollo_valuesx.png"
+set title "ROLLO: MEMS values"
+plot 'rollo_values.csv' using 1:2 with lines t "ACC X"
