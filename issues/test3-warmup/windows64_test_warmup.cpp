@@ -137,15 +137,15 @@ static inline int main(int argc, char ** argv) {
     
     while(entropyIndex < colData->count - windowSize){
         if(entropyIndex == colData->count / 4){
-            printf("25%\r\n");
+            printf("25%%\r\n");
         }
         
         if(entropyIndex == colData->count / 2){
-            printf("50%\r\n");
+            printf("50%%\r\n");
         }
         
         if(entropyIndex == 3 * colData->count / 4){
-            printf("75%\r\n");
+            printf("75%%\r\n");
         }
         for(int32 coli = 0; coli < 6; coli++){
             data->counts[coli] = 0;

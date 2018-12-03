@@ -286,7 +286,7 @@ struct ProgramContext : Common{
 };
 
 
-const uint32 memsCalibrationFrame = 10000;
+const uint32 memsCalibrationFrame = 30000;
 const uint32 memsWarmedUpFrame = 20000;
 
 #if METHOD_XBPNG
@@ -1489,7 +1489,7 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
                 int32 tDivisor = module->settings.sampleRate;
                 
                 int32 accDivisor = mpu6050_getAccDivisor(&module->settings);
-                int32 velDivisor = tDivisor * mpu6050_getAccDivisor(&module->settings);
+                int32 velDivisor = tDivisor * accDivisor;
                 int32 pDivisor = tDivisor * tDivisor * 2 * accDivisor;
                 
                 int32 degDivisor = tDivisor * mpu6050_getGyroDivisorTimes10(&module->settings);

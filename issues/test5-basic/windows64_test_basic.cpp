@@ -27,7 +27,7 @@ struct Context{
 Context context;
 
 struct ColData{
-    int16 values[6][66000];
+    int16 values[6][300000];
     int32 count;
 };
 
@@ -55,14 +55,23 @@ static inline int main(int argc, char ** argv) {
     
     ASSERT(readFile((const char *)argv[1], &contents));
     
-    char * filename = "result.csv";
+    char * filename = "data.rec";
+    char * filename2 = "pos.rec";
     
     FileContents csv;
     csv.size = 1024;
     csv.contents = &PUSHA(char, csv.size);
     
+    FileContents pos;
+    pos.size = 1024;
+    pos.contents = &PUSHA(char, pos.size);
+    
+    
     dv3_64 accBias = {};
     dv3_64 accVar = {};
+    
+    dv3_64 gyroBias = {};
+    dv3_64 gyroVar = {};
     
     //acc expectncy raw
     getNextLine(&contents, line, linelen);
@@ -72,19 +81,32 @@ static inline int main(int argc, char ** argv) {
     getNextLine(&contents, line, linelen);
     sscanf(line, "%lld %lld %lld", &accVar.x, &accVar.y, &accVar.z);
     
+    //gyro expectncy raw
+    getNextLine(&contents, line, linelen);
+    sscanf(line, "%lld %lld %lld", &gyroBias.x, &gyroBias.y, &gyroBias.z);
+    
+    //gyro std dev raw
+    getNextLine(&contents, line, linelen);
+    sscanf(line, "%lld %lld %lld", &gyroVar.x, &gyroVar.y, &gyroVar.z);
+    
     
     
     ColData * colData = &PUSH(ColData);
-    int32 it;
     while(getNextLine(&contents, line, linelen)){
-        ASSERT(sscanf(line, "%d;%hd;%hd;%hd;%hd;%hd;%hd", &it, &colData->values[0][colData->count], &colData->values[1][colData->count], &colData->values[2][colData->count], &colData->values[3][colData->count], &colData->values[4][colData->count], &colData->values[5][colData->count]) == 7);
+        ASSERT(sscanf(line, "%hd %hd %hd %hd %hd %hd", &colData->values[0][colData->count], &colData->values[1][colData->count], &colData->values[2][colData->count], &colData->values[3][colData->count], &colData->values[4][colData->count], &colData->values[5][colData->count]) == 6);
         colData->count++;
     }
     
     
+    dv3_64 accSum64 = {};
+    dv3_64 velSum64 = {};
+    v3_64 worldPosition64 = {};
     
+    int32 windowSize;
+    sscanf(argv[2], "%d", &windowSize);
     
-    int32 windowSize = 1;
+    printf("window size: %d\r\n", windowSize);
+    
     int32 iterationIndex = windowSize;
     while(iterationIndex < colData->count){
         int32 avgCols[6] = {};
@@ -95,7 +117,7 @@ static inline int main(int argc, char ** argv) {
             avgCols[coli] /= windowSize;
         }
         
-        dv3_64 accDataCleared = DV3_64(avgCols[0], avgCols[1], avgCols[2]) - accBias;
+        dv3_64 accDataCleared = DV3_64(avgCols[1], -avgCols[0], avgCols[2]) - accBias;
         for(int32 i = 0; i < 3; i++){
             //NOTE(AK): > and <= because the sd vas trimmed to whole numbers from floats
             if(accDataCleared.v[i] > -accVar.v[i] && accDataCleared.v[i] <= accVar.v[i]){
@@ -103,20 +125,40 @@ static inline int main(int argc, char ** argv) {
             }
         }
         
+        
+        dv3_64 gyroDataCleared = DV3_64(avgCols[3], avgCols[4], avgCols[5]) - gyroBias;
+        
+        for(int32 i = 0; i < 3; i++){
+            //NOTE(AK): > and <= because the sd vas trimmed to whole numbers from floats
+            if(gyroDataCleared.v[i] > -gyroVar.v[i] && gyroDataCleared.v[i] <= gyroVar.v[i]){
+                gyroDataCleared = {};
+            }
+        }
+        
 #if 1
         int32 tDivisor = 500/windowSize;
-        
+        float64 g = 9.8196f;
         int32 accDivisor = 2048;
         int32 velDivisor = tDivisor * accDivisor;
         int32 pDivisor = tDivisor * tDivisor * 2 * accDivisor;
         
+        int32 degDivisor = tDivisor * 655;
+        int32 degMultiplier = 10;
+        int32 degModulo = 360 * degDivisor / degMultiplier;
         
+        accSum64 += accDataCleared;
+        velSum64 += accSum64;
+        //actual locomotion
+        worldPosition64 = ((velSum64*2 - accSum64) / pDivisor)*g;
         
 #endif
 #if 1
-        snprintf(csv.contents, 1024, "%d;%lld;%lld;%lld;%lld;%lld;%lld\n", iterationIndex, accDataCleared.x, accDataCleared.y, accDataCleared.z, (int64)0, (int64)0, (int64)0);
+        snprintf(csv.contents, 1024, "%d;%lld;%lld;%lld;%lld;%lld;%lld\n", iterationIndex, accDataCleared.x, accDataCleared.y, accDataCleared.z, gyroDataCleared.x, gyroDataCleared.y, gyroDataCleared.z);
         csv.size = strlen(csv.contents);
         appendFile(filename, &csv);
+        snprintf(pos.contents, 1024, "%d;%lf;%lf;%lf\n", iterationIndex, worldPosition64.x, worldPosition64.y, worldPosition64.z);
+        pos.size = strlen(pos.contents);
+        appendFile(filename2, &pos);
 #endif
         iterationIndex += windowSize;
         
