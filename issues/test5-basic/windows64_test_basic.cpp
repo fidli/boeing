@@ -73,6 +73,32 @@ static inline int main(int argc, char ** argv) {
     dv3_64 gyroBias = {};
     dv3_64 gyroVar = {};
     
+    dv3_64 accSum64 = {};
+    dv3_64 velSum64 = {};
+    dv3_64 gyroSum64 = {};
+    
+    v3_64 worldPosition64 = {};
+    v3_64 rotationAngles64 = {};
+    
+    v3_64 defaultWorldPosition64 = {};
+    
+    //default worldPosition
+    getNextLine(&contents, line, linelen);
+    sscanf(line, "%lf %lf %lf", &defaultWorldPosition64.x, &defaultWorldPosition64.y, &defaultWorldPosition64.z);
+    
+    //default acc sum
+    getNextLine(&contents, line, linelen);
+    sscanf(line, "%lld %lld %lld", &accSum64.x, &accSum64.y, &accSum64.z);
+    
+    //default vel sum
+    getNextLine(&contents, line, linelen);
+    sscanf(line, "%lld %lld %lld", &velSum64.x, &velSum64.y, &velSum64.z);
+    
+    //default gyro sum
+    getNextLine(&contents, line, linelen);
+    sscanf(line, "%lld %lld %lld", &gyroSum64.x, &gyroSum64.y, &gyroSum64.z);
+    
+    
     //acc expectncy raw
     getNextLine(&contents, line, linelen);
     sscanf(line, "%lld %lld %lld", &accBias.x, &accBias.y, &accBias.z);
@@ -98,9 +124,6 @@ static inline int main(int argc, char ** argv) {
     }
     
     
-    dv3_64 accSum64 = {};
-    dv3_64 velSum64 = {};
-    v3_64 worldPosition64 = {};
     
     int32 windowSize;
     sscanf(argv[2], "%d", &windowSize);
@@ -118,23 +141,24 @@ static inline int main(int argc, char ** argv) {
         }
         
         dv3_64 accDataCleared = DV3_64(avgCols[1], -avgCols[0], avgCols[2]) - accBias;
-        for(int32 i = 0; i < 3; i++){
+        
+        /*for(int32 i = 0; i < 3; i++){
             //NOTE(AK): > and <= because the sd vas trimmed to whole numbers from floats
             if(accDataCleared.v[i] > -accVar.v[i] && accDataCleared.v[i] <= accVar.v[i]){
                 accDataCleared = {};
             }
-        }
+        }*/
         
         
-        dv3_64 gyroDataCleared = DV3_64(avgCols[3], avgCols[4], avgCols[5]) - gyroBias;
-        
+        dv3_64 gyroDataCleared = DV3_64(-avgCols[3], -avgCols[4], -avgCols[5]) - gyroBias;
+        /*
         for(int32 i = 0; i < 3; i++){
             //NOTE(AK): > and <= because the sd vas trimmed to whole numbers from floats
             if(gyroDataCleared.v[i] > -gyroVar.v[i] && gyroDataCleared.v[i] <= gyroVar.v[i]){
                 gyroDataCleared = {};
             }
         }
-        
+        */
 #if 1
         int32 tDivisor = 500/windowSize;
         float64 g = 9.8196f;
@@ -149,14 +173,22 @@ static inline int main(int argc, char ** argv) {
         accSum64 += accDataCleared;
         velSum64 += accSum64;
         //actual locomotion
-        worldPosition64 = ((velSum64*2 - accSum64) / pDivisor)*g;
+        worldPosition64 = defaultWorldPosition64 + ((velSum64*2 - accSum64) / pDivisor)*g;
+        
+        gyroSum64 += gyroDataCleared;
+        for(uint8 i = 0; i < 3; i++){
+            gyroSum64.v[i] += degModulo;
+            gyroSum64.v[i] = gyroSum64.v[i] % degModulo;
+        }
+        
+        rotationAngles64 = (gyroSum64 * degMultiplier)/degDivisor;
         
 #endif
 #if 1
         snprintf(csv.contents, 1024, "%d;%lld;%lld;%lld;%lld;%lld;%lld\n", iterationIndex, accDataCleared.x, accDataCleared.y, accDataCleared.z, gyroDataCleared.x, gyroDataCleared.y, gyroDataCleared.z);
         csv.size = strlen(csv.contents);
         appendFile(filename, &csv);
-        snprintf(pos.contents, 1024, "%d;%lf;%lf;%lf\n", iterationIndex, worldPosition64.x, worldPosition64.y, worldPosition64.z);
+        snprintf(pos.contents, 1024, "%d;%lf;%lf;%lf;%lf;%lf;%lf\n", iterationIndex, worldPosition64.x, worldPosition64.y, worldPosition64.z, rotationAngles64.x, rotationAngles64.y, rotationAngles64.z);
         pos.size = strlen(pos.contents);
         appendFile(filename2, &pos);
 #endif

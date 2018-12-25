@@ -1,0 +1,46 @@
+set xlabel "Iteration #"
+set ylabel "Value"
+set datafile sep ';'
+set term png
+
+
+set title "HENRY basic test: values"
+
+set output "henry_1.png"
+plot "henry_calc.rec" u 1:2 w lines t "POS X"
+
+set output "henry_2.png"
+plot "henry_calc.rec" u 1:3 w lines t "POS Y"
+
+set output "henry_3.png"
+plot "henry_calc.rec" u 1:4 w lines t "POS Z"
+
+set output "henry_4.png"
+plot "henry_calc.rec" u 1:5 w lines t "DEGREES X"
+
+set output "henry_5.png"
+plot "henry_calc.rec" u 1:6 w lines t "DEGREES Y"
+
+set output "henry_6.png"
+plot "henry_calc.rec" u 1:7 w lines t "DEGREES Z"
+
+
+set title "ROLLO  basic test: values"
+
+set output "rollo_1.png"
+plot "rollo_calc.rec" u 1:2 w lines t "POS X"
+
+set output "rollo_2.png"
+plot "rollo_calc.rec" u 1:3 w lines t "POS Y"
+
+set output "rollo_3.png"
+plot "rollo_calc.rec" u 1:4 w lines t "POS Z"
+
+set output "rollo_4.png"
+plot "rollo_calc.rec" u 1:5 w lines t "DEGREES X"
+
+set output "rollo_5.png"
+plot "rollo_calc.rec" u 1:6 w lines t "DEGREES Y"
+
+set output "rollo_6.png"
+plot "rollo_calc.rec" u 1:7 w lines t "DEGREES Z"

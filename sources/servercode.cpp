@@ -290,8 +290,8 @@ const uint32 memsCalibrationFrame = 30000;
 const uint32 memsWarmedUpFrame = 20000;
 
 #if METHOD_XBPNG
-const uint32 xbWarmedUpFrame = 0;
-const uint32 xbCalibrationFrame = 0;
+const uint32 xbWarmedUpFrame = 1;
+const uint32 xbCalibrationFrame = 2;
 #endif
 
 
@@ -1511,8 +1511,9 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
                     //NOTE(AK): this is hardcoded rotation for our default orientation in the map
                     //this will change, when default orientation change
                     //TODO(): implement when maps include different orientiaiton
+                    //NOTE(AK): gyro data are left handed rotation and we use right handed
                     dv3_64 accDataRotated = DV3_64(data->accY, -data->accX, data->accZ);
-                    dv3_64 gyroData = DV3_64(data->gyroX, data->gyroY, data->gyroZ);
+                    dv3_64 gyroData = DV3_64(-data->gyroX, -data->gyroY, -data->gyroZ);
 
                     dv3_64 accDataCleared = accDataRotated - module->accBias64;
                     dv3_64 gyroDataCleared = gyroData - module->gyroBias64;
@@ -1544,9 +1545,9 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
                             module->rotationAngles64 = (module->gyroSum64 * degMultiplier)/degDivisor;
                             
                             //rotation difference
-                            v4_64 quatX = Quat64(V3_64(1, 0, 0), degToRad64(-module->rotationAngles64.x));
-                            v4_64 quatY = Quat64(V3_64(0, 1, 0), degToRad64(-module->rotationAngles64.y));
-                            v4_64 quatZ = Quat64(V3_64(0, 0, 1), degToRad64(-module->rotationAngles64.z));
+                            v4_64 quatX = Quat64(V3_64(1, 0, 0), degToRad64(module->rotationAngles64.x));
+                            v4_64 quatY = Quat64(V3_64(0, 1, 0), degToRad64(module->rotationAngles64.y));
+                            v4_64 quatZ = Quat64(V3_64(0, 0, 1), degToRad64(module->rotationAngles64.z));
                             
                             rotationMatrix  = quaternionToMatrix64(normalize64(normalize64(quatX * quatY) * quatZ));
                             
