@@ -4,7 +4,7 @@ set datafile sep ' '
 set term png
 
 
-set title "HENRY GRAIN: 20000-22000th frame"
+set title "HENRY GRAIN: 20000-30000th frame"
 
 set output "henry_1.png"
 plot "henry.rec" u ($1):(1) smooth freq w boxes t "ACC X"
@@ -25,7 +25,7 @@ set output "henry_6.png"
 plot "henry.rec" u ($6):(1) smooth freq w boxes t "GYRO Z"
 
 
-set title "ROLLO GRAIN: 20000-22000th frame"
+set title "ROLLO GRAIN: 20000-30000th frame"
 
 set output "rollo_1.png"
 plot "rollo.rec" u ($1):(1) smooth freq w boxes t "ACC X"
