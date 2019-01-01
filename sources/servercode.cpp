@@ -291,7 +291,7 @@ const uint32 memsWarmedUpFrame = 20000;
 
 #if METHOD_XBPNG
 const uint32 xbWarmedUpFrame = 1;
-const uint32 xbCalibrationFrame = 2;
+const uint32 xbCalibrationFrame = 5;
 #endif
 
 
@@ -354,9 +354,9 @@ void resetModule(int index, bool haltBoeing = true, bool recalibrate = true){
     
     
     
-    /*
-    if(programContext->replay){
     
+    if(programContext->replay){
+        module->timeConnected = 0;
         /*
                 mpu6050_gyro32_float64(module->settings, module->gyroBias.x,  module->gyroBias.y,  module->gyroBias.z, &module->gyroBias64.x, &module->gyroBias64.y, &module->gyroBias64.z);
                 module->gyroBias64 = module->gyroBias64 * (1.0f/(programContext->recordData.defaultModule[index].biasCount));
@@ -402,9 +402,10 @@ void resetModule(int index, bool haltBoeing = true, bool recalibrate = true){
         mat4_64 rotationMatrix  = quaternionToMatrix64(quatX * quatY * quatZ);
         
         module->worldOrientation64 = rotationMatrix * module->worldOrientation64;
+        */
         
     }
-*/
+
     
     
     programContext->recordData.data[index].recordDataXbIndex = 0;
@@ -892,7 +893,7 @@ extern "C" __declspec(dllexport) void initDomainRoutine(void * memoryStart, Imag
             char line[1024];
            
             //beacon names
-            result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && getNextLine(&contents, line, ARRAYSIZE(line))  && sscanf(line, "%8s %8s %8s %8s", &programContext->beacons[0].sidLower, &programContext->beacons[1].sidLower, &programContext->beacons[2].sidLower, &programContext->beacons[3].sidLower) == 4;
+            result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && getNextLine(&contents, line, ARRAYSIZE(line)) && getNextLine(&contents, line, ARRAYSIZE(line))  && sscanf(line, "%8s %8s %8s %8s", &programContext->beacons[0].sidLower, &programContext->beacons[1].sidLower, &programContext->beacons[2].sidLower, &programContext->beacons[3].sidLower) == 4;
             
             //beacon position x
             result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && getNextLine(&contents, line, ARRAYSIZE(line));
@@ -913,13 +914,13 @@ extern "C" __declspec(dllexport) void initDomainRoutine(void * memoryStart, Imag
  
             uint64 moduleCount = 0;
             //module heads
-            result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%llu", &moduleCount) == 1;
+            result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && getNextLine(&contents, line, ARRAYSIZE(line)) && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%llu", &moduleCount) == 1;
            
             
             for(uint64 moduleIndex = 0; moduleIndex < moduleCount; moduleIndex++){
                 ProgramContext::Module * module = &programContext->modules[moduleIndex];
                 //module name
-                if(getNextLine(&contents, line, ARRAYSIZE(line)) && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%1c", &module->name) == 1){
+                if(getNextLine(&contents, line, ARRAYSIZE(line)) && getNextLine(&contents, line, ARRAYSIZE(line)) && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%1c", &module->name) == 1){
                     module->run = true;
                     //mems rate
                     result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%hu", &module->settings.sampleRate) == 1;
@@ -978,25 +979,25 @@ extern "C" __declspec(dllexport) void initDomainRoutine(void * memoryStart, Imag
 #endif
 #if METHOD_XBPNG
             //xb starting frames
-                    result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%u %u %u %u", &module->xbFrames[0], &module->xbFrames[1], &module->xbFrames[2], &module->xbFrames[3]) == 1;
+                    result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%u %u %u %u", &module->xbFrames[0], &module->xbFrames[1], &module->xbFrames[2], &module->xbFrames[3]) == 4;
 #endif                    
 
                     
                     //acc expectncy raw
                     result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && getNextLine(&contents, line, ARRAYSIZE(line));
-                    result = result && sscanf(line, "%lld %lld %lld", &module->accBias64.x, &module->accBias64.y, &module->accBias64.z) == 3;
+                    result = result && sscanf(line, "%lld %lld %lld", &module->defaultAccBias64.x, &module->defaultAccBias64.y, &module->defaultAccBias64.z) == 3;
 
                     //acc std dev raw
                     result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && getNextLine(&contents, line, ARRAYSIZE(line));
-                    result = result && sscanf(line, "%lld %lld %lld", &module->accVar64.x, &module->accVar64.y, &module->accVar64.z) == 3;
+                    result = result && sscanf(line, "%lld %lld %lld", &module->defaultAccVar64.x, &module->defaultAccVar64.y, &module->defaultAccVar64.z) == 3;
 
                     //gyro expectncy raw
                     result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && getNextLine(&contents, line, ARRAYSIZE(line));
-                    result = result && sscanf(line, "%lld %lld %lld", &module->gyroBias64.x, &module->gyroBias64.y, &module->gyroBias64.z) == 3;
+                    result = result && sscanf(line, "%lld %lld %lld", &module->defaultGyroBias64.x, &module->defaultGyroBias64.y, &module->defaultGyroBias64.z) == 3;
 
                     //gyro std dev raw
                     result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && getNextLine(&contents, line, ARRAYSIZE(line));
-                    result = result && sscanf(line, "%lld %lld %lld", &module->gyroVar64.x, &module->gyroVar64.y, &module->gyroVar64.z) == 3;
+                    result = result && sscanf(line, "%lld %lld %lld", &module->defaultGyroVar64.x, &module->defaultGyroVar64.y, &module->defaultGyroVar64.z) == 3;
 
                     //mems data count
                     result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%u", &programContext->recordData.data[moduleIndex].recordDataMemsCount) == 1;
@@ -1004,15 +1005,19 @@ extern "C" __declspec(dllexport) void initDomainRoutine(void * memoryStart, Imag
                     //xb data count
                     result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%u", &programContext->recordData.data[moduleIndex].recordDataXbCount) == 1;
                     
+                    //#----
+                    result = result && getNextLine(&contents, line, ARRAYSIZE(line));
                 }
+            }
                 //module heads
                 result = result && getNextLine(&contents, line, ARRAYSIZE(line));
                 
                 for(uint64 moduleIndex = 0; moduleIndex < moduleCount; moduleIndex++){
                     ProgramContext::Module * module = &programContext->modules[moduleIndex];
+
                     //module name
                     char moduleName = 0;
-                    if(getNextLine(&contents, line, ARRAYSIZE(line)) && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%1c", &moduleName) == 1){
+                    if(getNextLine(&contents, line, ARRAYSIZE(line)) && getNextLine(&contents, line, ARRAYSIZE(line)) && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%1c", &moduleName) == 1){
                         ASSERT(moduleName == module->name);
                         //mems data
                         result = result && getNextLine(&contents, line, ARRAYSIZE(line));
@@ -1021,26 +1026,39 @@ extern "C" __declspec(dllexport) void initDomainRoutine(void * memoryStart, Imag
                     for(uint32 di = 0; di < programContext->recordData.data[moduleIndex].recordDataMemsCount; di++){
                         result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%hd %hd %hd %hd %hd %hd", &programContext->recordData.data[moduleIndex].mems[di].accX, &programContext->recordData.data[moduleIndex].mems[di].accY, &programContext->recordData.data[moduleIndex].mems[di].accZ, &programContext->recordData.data[moduleIndex].mems[di].gyroX, &programContext->recordData.data[moduleIndex].mems[di].gyroY, &programContext->recordData.data[moduleIndex].mems[di].gyroZ) == 6;
                     }
-                        //xb data
-                        result = result && getNextLine(&contents, line, ARRAYSIZE(line));
-                        
+                    
+                    //xb data
+                    result = result && getNextLine(&contents, line, ARRAYSIZE(line));
+
                     //xb data
                     for(uint32 di = 0; di < programContext->recordData.data[moduleIndex].recordDataXbCount; di++){
-//                        result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%llu %llu %llu %llu", &programContext->recordData.data[moduleIndex].xb[di].delay[0], &programContext->recordData.data[moduleIndex].xb[di].delay[1], &programContext->recordData.data[moduleIndex].xb[di].delay[2], &programContext->recordData.data[moduleIndex].xb[di].delay[3]) == 4;
+#if METHOD_XBSP
+                            result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%lf %llu %llu %llu %llu", &programContext->recordData.data[moduleIndex].xb[di].timeReceived, &programContext->recordData.data[moduleIndex].xb[di].delay[0], &programContext->recordData.data[moduleIndex].xb[di].delay[1], &programContext->recordData.data[moduleIndex].xb[di].delay[2], &programContext->recordData.data[moduleIndex].xb[di].delay[3]) == 5;
+#endif
+#if METHOD_XBPNG
+                            result = result && getNextLine(&contents, line, ARRAYSIZE(line)) && sscanf(line, "%lf %u %llu",  &programContext->recordData.data[moduleIndex].xb[di].timeReceived, &programContext->recordData.data[moduleIndex].xb[di].beaconIndex, &programContext->recordData.data[moduleIndex].xb[di].lastTick) == 3;
+#endif
                     }
                     
-                }
+                
                     module->boeingHalted = true;
                     module->beaconsHalted = true;
                     module->processHalted = true;
                     resetModule(moduleIndex);
-                    module->boeingHalted = false;
+	                    module->boeingHalted = false;
                     module->beaconsHalted = false;
                     module->processHalted = false;
                 }
                 
                 ASSERT(result);
             }
+    
+        }else{
+            NetSocketSettings settings;
+            settings.blocking = false;
+            result &= initSocket(&programContext->serverSocket, programContext->ip, programContext->port, &settings);
+            result &= tcpListen(&programContext->serverSocket, 10);
+            
         }
         
         FileContents fontFile = {};
@@ -1054,10 +1072,6 @@ extern "C" __declspec(dllexport) void initDomainRoutine(void * memoryStart, Imag
         
         programContext->localisationType = LocalisationType_Mems_Ori;
         
-        NetSocketSettings settings;
-        settings.blocking = false;
-        result &= initSocket(&programContext->serverSocket, programContext->ip, programContext->port, &settings);
-        result &= tcpListen(&programContext->serverSocket, 10);
         
         
         programContext->inited = result;
