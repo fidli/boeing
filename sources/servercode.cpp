@@ -351,62 +351,9 @@ void resetModule(int index, bool haltBoeing = true, bool recalibrate = true){
         programContext->beacons[beaconIndex].moduleDistance64[index] = length64(V2_64(module->worldPosition64.x, module->worldPosition64.y) - V2_64(programContext->beacons[beaconIndex].worldPosition64.x, programContext->beacons[beaconIndex].worldPosition64.y));
     }
     
-    
-    
-    
-    
     if(programContext->replay){
         module->timeConnected = 0;
-        /*
-                mpu6050_gyro32_float64(module->settings, module->gyroBias.x,  module->gyroBias.y,  module->gyroBias.z, &module->gyroBias64.x, &module->gyroBias64.y, &module->gyroBias64.z);
-                module->gyroBias64 = module->gyroBias64 * (1.0f/(programContext->recordData.defaultModule[index].biasCount));
-                
-                mpu6050_gyro32_float64(module->settings, module->gyroBiasLower.x,  module->gyroBiasLower.y,  module->gyroBiasLower.z, &module->gyroBiasLower64.x, &module->gyroBiasLower64.y, &module->gyroBiasLower64.z);
-                module->gyroBiasLower64 -=  module->gyroBias64;
-                
-                mpu6050_gyro32_float64(module->settings, module->gyroBiasUpper.x,  module->gyroBiasUpper.y,  module->gyroBiasUpper.z, &module->gyroBiasUpper64.x, &module->gyroBiasUpper64.y, &module->gyroBiasUpper64.z);
-                module->gyroBiasUpper64 -=  module->gyroBias64;
-                
-                
-                
-                mpu6050_acc32_float64(module->settings, module->accelerationBias.x,  module->accelerationBias.y,  module->accelerationBias.z, &module->accelerationBias64.x, &module->accelerationBias64.y, &module->accelerationBias64.z);
-                module->accelerationBias64 = module->accelerationBias64 * (1.0f/(programContext->recordData.defaultModule[index].biasCount));
-                
-                mpu6050_acc32_float64(module->settings, module->accelerationBiasLower.x,  module->accelerationBiasLower.y,  module->accelerationBiasLower.z, &module->accelerationBiasLower64.x, &module->accelerationBiasLower64.y, &module->accelerationBiasLower64.z);
-                module->accelerationBiasLower64 -=  module->accelerationBias64;
-                
-                mpu6050_acc32_float64(module->settings, module->accelerationBiasUpper.x,  module->accelerationBiasUpper.y,  module->accelerationBiasUpper.z, &module->accelerationBiasUpper64.x, &module->accelerationBiasUpper64.y, &module->accelerationBiasUpper64.z);
-                module->accelerationBiasUpper64 -=  module->accelerationBias64;
-                
-        //yz plane is x rotation (roll)
-        v2_64 downward = V2_64(0,-1);
-        v2_64 deltaX = V2_64(module->accelerationBias64.y, module->accelerationBias64.z);
-        
-        //y,x plane is z rotation (yaw)
-        v2_64 forward = V2_64(0, -1);
-        v2_64 deltaZ = V2_64(module->accelerationBias64.y, module->accelerationBias64.x);
-        
-        //x, z plane is y rotation (pitch)
-        v2_64 deltaY = V2_64(module->accelerationBias64.x, module->accelerationBias64.z);
-        
-        float64 rotationX = 180 - radToDeg64(radAngle64(deltaX, downward));
-        float64 rotationY = 180 - radToDeg64(radAngle64(deltaZ, forward));
-        float64 rotationZ = 180 - radToDeg64(radAngle64(deltaY, downward));
-        
-        module->rotationAngles64 = V3_64(rotationX, -rotationY, -rotationZ);
-        
-        v4_64 quatX = Quat64(V3_64(1, 0, 0), degToRad64(-module->rotationAngles64.x));
-        v4_64 quatY = Quat64(V3_64(0, 1, 0), degToRad64(-module->rotationAngles64.y));
-        v4_64 quatZ = Quat64(V3_64(0, 0, 1), degToRad64(-module->rotationAngles64.z));
-        
-        mat4_64 rotationMatrix  = quaternionToMatrix64(quatX * quatY * quatZ);
-        
-        module->worldOrientation64 = rotationMatrix * module->worldOrientation64;
-        */
-        
     }
-
-    
     
     programContext->recordData.data[index].recordDataXbIndex = 0;
     programContext->recordData.data[index].recordDataMemsIndex = 0;
@@ -1569,19 +1516,6 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
                             
                         }
                         if(programContext->localisationType == LocalisationType_Mems_Loco){
-/*//                            if(length64(accDataCleared) > 0){
-                            //friction
-                            v3_64 frictionCoef = {0.0f, 0.0f, 0.000f};
-                            v3_64 biasForFriction = length64(module->accBias64) * normalize64(accDataCleared);
-                            v3_64 frictionR = hadamard64(biasForFriction, frictionCoef);
-                                dv3_64 friction = DV3_64((int64) frictionR.x, (int64) frictionR.y, (int64) frictionR.z);
-                                dv3_64 resultAcc = accDataCleared - friction;
-                                if(length64(module->velocity64) > 0){
-                                    accDataCleared -= friction;
-                                }
-                                                                
-  //                          }
-  */                          
                             module->accSum64 += accDataCleared;
                             module->acceleration64 = accDataCleared / accDivisor;
                             module->velocity64 = (module->accSum64/velDivisor)*g;
@@ -1652,7 +1586,7 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
         
     }else if(programContext->localisationType == LocalisationType_Xb){
 #if METHOD_XBPNG
-        
+
         for(uint32 i = 0; i < ARRAYSIZE(programContext->modules); i++){
             ProgramContext::Module * module = &programContext->modules[i];
             
@@ -1662,6 +1596,7 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
                 module->memsTailIndex = (module->memsTailIndex + memsSteps[i]) % ARRAYSIZE(module->memsData);          
             }
         }
+        //NOTE(AK): this needs to be verified and finished, not done, because XB.algorithms were not used
         /*
         if(programContext->restartReplay || stepsAmount == 0){
             if(programContext->replay){
@@ -1781,6 +1716,8 @@ extern "C" __declspec(dllexport) void processDomainRoutine(){
 #endif
         
 #if METHOD_XBSP
+        //NOTE(AK): this algorithm was not used at all in the end... 
+        //AABB needs to be implemented and replay capability verified
         
         uint16 stepsAmount = 0;
         
@@ -2366,7 +2303,7 @@ extern "C" __declspec(dllexport) void renderDomainRoutine(){
         {
             printToBitmap(programContext->renderingTarget, offset.x, offset.y -border, "PITCH", &programContext->font, fontSize, blue);
             
-            //static shit
+            //static stuff
             dv2 bottomLeftCorner = {offset.x, offset.y + size};
             dv2 bottomRightCorner = {offset.x + size, offset.y + size};
             dv2 center = {offset.x + sizeHalf, offset.y + sizeHalf};
@@ -2453,7 +2390,7 @@ extern "C" __declspec(dllexport) void renderDomainRoutine(){
         //orientation roll
         {
             printToBitmap(programContext->renderingTarget, offset.x, offset.y -border, "ROLL", &programContext->font, fontSize, blue);
-            //static shit
+            //static stuff
             dv2 bottomLeftCorner = {offset.x, offset.y + size};
             dv2 bottomRightCorner = {offset.x + size, offset.y + size};
             dv2 center = {offset.x + sizeHalf, offset.y + sizeHalf};
@@ -2534,7 +2471,7 @@ extern "C" __declspec(dllexport) void renderDomainRoutine(){
         //orientation yaw
         {
             printToBitmap(programContext->renderingTarget, offset.x, offset.y -border, "YAW", &programContext->font, fontSize, blue);
-            //static shit
+            //static stuff
             dv2 topLeftCorner = {offset.x, offset.y};
             dv2 bottomRightCorner = {offset.x + size, offset.y + size};
             dv2 center = {offset.x + sizeHalf, offset.y + sizeHalf};
@@ -2604,7 +2541,7 @@ extern "C" __declspec(dllexport) void renderDomainRoutine(){
         v2 topDownAcc = V2(accY, accX);
         {
             printToBitmap(programContext->renderingTarget, offset.x, offset.y -border, "ACC YAW", &programContext->font, fontSize, red);
-            //static shit
+            //static stuff
             dv2 topLeftCorner = {offset.x, offset.y};
             dv2 bottomRightCorner = {offset.x + size, offset.y + size};
             dv2 center = {offset.x + sizeHalf, offset.y + sizeHalf};
@@ -2664,7 +2601,7 @@ extern "C" __declspec(dllexport) void renderDomainRoutine(){
         {
             printToBitmap(programContext->renderingTarget, offset.x, offset.y -border, "ACC PITCH", &programContext->font, fontSize, red);
             
-            //static shit
+            //static stuff
             dv2 bottomLeftCorner = {offset.x, offset.y + size};
             dv2 bottomRightCorner = {offset.x + size, offset.y + size};
             dv2 center = {offset.x + sizeHalf, offset.y + sizeHalf};
@@ -2750,7 +2687,7 @@ extern "C" __declspec(dllexport) void renderDomainRoutine(){
             printToBitmap(programContext->renderingTarget, offset.x, offset.y -border, "ACC SIZE", &programContext->font, fontSize, red);
             offset.x += sizeHalf/2;
             
-            //static shit
+            //static stuff
             dv2 topLeftCorner = {offset.x, offset.y};
             dv2 bottomRightCorner = {offset.x + sizeHalf, offset.y + size};
             

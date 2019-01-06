@@ -118,9 +118,14 @@ static inline int main(LPWSTR * argvW, int argc) {
             Na += accRaw;
             vel = (Na/velDivisor)*g;
             
+            
+            dv3_64 eqNv = Nv + Na;
+            v3_64 eqPos = ((eqNv*2 - Na) / pDivisor)*g;
+            
+            dv3_64 currentArg = Nv*2 + Na;
             Nv += Na;
-            dv3_64 currentArg = Nv*2 - Na;
             pos = (currentArg / pDivisor)*g;
+            ASSERT(pos.x == eqPos.x && pos.y == eqPos.y && pos.z == eqPos.z);
             
         }
         
@@ -182,7 +187,7 @@ static inline int main(LPWSTR * argvW, int argc) {
             
         }
         
-        snprintf(csv.contents, 1024, "%d;%60.30lf;%60.30lf;%60.30lf;%60.30lf;%60.30lf;%60.30lf;%60.30lf;%60.30lf;%60.30lf\r\n", i, Rp.x, pos.x, Rv.x, vel.x, anglesReal.x, anglesRaw.x, orientationReal.x, orientationRaw.x, o.x);
+        //snprintf(csv.contents, 1024, "%d;%60.30lf;%60.30lf;%60.30lf;%60.30lf;%60.30lf;%60.30lf;%60.30lf;%60.30lf;%60.30lf\r\n", i, Rp.x, pos.x, Rv.x, vel.x, anglesReal.x, anglesRaw.x, orientationReal.x, orientationRaw.x, o.x);
         csv.size = strlen(csv.contents);
         appendFile(filename, &csv);
     }

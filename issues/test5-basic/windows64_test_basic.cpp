@@ -171,9 +171,10 @@ static inline int main(int argc, char ** argv) {
         int32 degModulo = 360 * degDivisor / degMultiplier;
         
         accSum64 += accDataCleared;
-        velSum64 += accSum64;
+        
         //actual locomotion
-        worldPosition64 = defaultWorldPosition64 + ((velSum64*2 - accSum64) / pDivisor)*g;
+        worldPosition64 = defaultWorldPosition64 + ((velSum64*2 + accSum64) / pDivisor)*g;
+        velSum64 += accSum64;
         
         gyroSum64 += gyroDataCleared;
         for(uint8 i = 0; i < 3; i++){
